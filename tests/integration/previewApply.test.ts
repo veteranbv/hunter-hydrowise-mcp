@@ -337,8 +337,6 @@ describe('preview/apply contract', () => {
         expanders: null,
         runTimeGroups: [],
         controllerNotes: [],
-        // Required by Controller since the v7 status fields; ControllerStatus is non-null per schema.
-        status: { online: true, summary: 'All good', icon: 'ok', accumulatedWaterSavings: 0 },
       }),
       updateLocation: async () => {
         called = true;
