@@ -328,12 +328,6 @@ describe('preview/apply contract', () => {
         lastContactTime: null,
         location: null,
         settings: null,
-        status: {
-          online: true,
-          summary: 'All good!',
-          icon: 'ok.png',
-          accumulatedWaterSavings: 100,
-        },
         masterZone: null,
         expanders: null,
         runTimeGroups: [],
