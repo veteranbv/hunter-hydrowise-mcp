@@ -100,6 +100,9 @@ export const IDENTIFIER_WHITELIST: ReadonlySet<string> = new Set([
   'start_week', 'end_week', 'start_month', 'end_month', 'start_year', 'end_year', 'year',
   // Reporting water-saving-summary period selector (ordinal index, not a physical measurement)
   'period_number',
+  // Event-log pagination: page is an ordinal index and length is a row count,
+  // neither is a physical measurement
+  'page', 'length',
 ]);
 
 export function inferWaterVolumeUnit(country: string | null | undefined): 'gallons' | 'liters' {
@@ -615,6 +618,21 @@ export function serializeWeatherStation(
           wind: w.currentObservation.wind ?? null,
         }
       : null,
+  };
+}
+
+// Controller event. `actions` is a nullable list of nullable strings upstream;
+// nulls are stripped so consumers can iterate without guards.
+export function serializeEvent(
+  e: import('../hydrawise/queries.js').EventRead,
+): Record<string, unknown> {
+  return {
+    id: e.id,
+    event_time: e.eventTime,
+    severity: e.severity,
+    message: e.message,
+    is_alert: e.isAlert,
+    actions: nonNull(e.actions),
   };
 }
 

@@ -1,0 +1,58 @@
+## evidence run @ e17c7ae (fix(scheduling): cover Advanced programs fully in adjustment)
+{
+ "sha": "e17c7ae",
+ "cases": [
+  {
+   "case": "catalog+attached (program P1 on controller C1)",
+   "catalog_ids": [
+    8,
+    11,
+    12,
+    19,
+    20,
+    7
+   ],
+   "attached_ids": [
+    7,
+    8,
+    11,
+    12
+   ],
+   "catalog_has_labels": true,
+   "catalog_has_method": true,
+   "pass": true
+  },
+  {
+   "case": "catalog-only (no program_id)",
+   "catalog_size": 6,
+   "attached": null,
+   "pass": true
+  },
+  {
+   "case": "unknown program id",
+   "response": "config_error: program 1 not found on con",
+   "pass": true
+  },
+  {
+   "case": "preserved: get_program schedule_adjustment_ids unchanged",
+   "ids": [
+    7,
+    8,
+    11,
+    12
+   ],
+   "labels_added": true,
+   "ids_equal_attached": true,
+   "pass": true
+  },
+  {
+   "case": "snapshot v9",
+   "version": 9,
+   "catalog_present": true,
+   "catalog_size": 6,
+   "caveat_mentions_tool": true,
+   "pass": true
+  }
+ ],
+ "all_pass": true
+}

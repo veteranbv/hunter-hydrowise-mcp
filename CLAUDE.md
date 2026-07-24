@@ -93,6 +93,7 @@ openspec/              spec-driven workflow artifacts (proposals, designs, tasks
 
 ### Control — `src/tools/control.ts` (PHYSICAL ACTION)
 - `start_zone`, `stop_zone`, `start_all_zones`, `stop_all_zones`
+- `list_controller_events`, `list_controller_alert_events`, `acknowledge_event`, `acknowledge_all_events` — the controller event log. Note `Controller.alerts` is typed `[Event!]!` upstream: it returns alert-flagged events, not alert configuration, which is why the tool is named for events. `Event.id` is a String, so `acknowledge_event` takes a string id.
 - `run_program`, `run_program_start_time`, `run_selected_zones`, `cancel_zone_runs` — program-level run control. `mark_run_as_scheduled` is required on the two program tools (the mutation declares it non-null). Duration overrides are sent as seconds, verified on a live controller 2026-07-24: `customDuration: 60` produced a 1-minute run, and a program run queues its zones sequentially rather than concurrently. `cancel_zone_runs` clears queued runs too, unlike `stop_zone`.
 - `list_weather_stations`, `add_weather_station`, `add_virtual_weather_station`, `remove_weather_station` — the weather source behind the watering triggers. Mutations return bare Boolean, so failures map to mutation_error explicitly. Observed live: `add_virtual_weather_station` returns true without attaching anything when the account's station slot is already full, so re-read the list to confirm.
 - `suspend_zone`, `resume_zone`, `suspend_all_zones`, `resume_all_zones`
