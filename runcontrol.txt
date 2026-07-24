@@ -1,0 +1,28 @@
+# run-control evidence @ 835d425
+# hygiene receipts
+  git diff --check: clean
+  npm run lint: clean
+  npm run typecheck: clean
+  npm test: Tests  337 passed
+# live matrix (real controller, ids redacted)
+{
+ "cases": [
+  {
+   "case": "run_selected_zones 60s -> unit check",
+   "duration_min": 1,
+   "remaining_sec": 52,
+   "pass": true
+  },
+  {
+   "case": "cancel_zone_runs (preserved: stop path still stops)",
+   "status": "OK",
+   "pass": true
+  },
+  {
+   "case": "post-run state: nothing running or queued",
+   "live_runs": 0,
+   "pass": true
+  }
+ ],
+ "all_pass": true
+}
