@@ -5,6 +5,9 @@ import {
   CONTROLLER_QUERY,
   CONTROLLER_SENSORS_QUERY,
   CONTROLLERS_QUERY,
+  ADD_VIRTUAL_WEATHER_STATION_MUTATION,
+  ADD_WEATHER_STATION_MUTATION,
+  CANCEL_RUNS_FOR_ZONE_MUTATION,
   ACKNOWLEDGE_ALL_EVENTS_MUTATION,
   ACKNOWLEDGE_EVENT_MUTATION,
   CONTROLLER_ALERT_EVENTS_QUERY,
@@ -30,6 +33,8 @@ import {
   DELETE_ZONE_NOTE_MUTATION,
   HIBERNATE_CONTROLLER_MUTATION,
   ME_QUERY,
+  CONDITIONAL_WATERING_ADJUSTMENTS_QUERY,
+  CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY,
   PROGRAM_START_TIMES_QUERY,
   PROGRAMS_FULL_QUERY,
   PROGRAMS_QUERY,
@@ -40,7 +45,10 @@ import {
   SEASONAL_ADJUSTMENTS_QUERY,
   SENSOR_MODEL_CATALOG_QUERY,
   START_ALL_ZONES_MUTATION,
+  START_SELECTED_ZONES_MUTATION,
   START_ZONE_MUTATION,
+  START_ZONES_WITH_PROGRAM_MUTATION,
+  START_ZONES_WITH_PROGRAM_START_TIME_MUTATION,
   STOP_ALL_ZONES_MUTATION,
   STOP_ZONE_MUTATION,
   SUSPEND_ALL_ZONES_MUTATION,
@@ -61,7 +69,9 @@ import {
   UPDATE_VSS_WATERING_PROGRAM_MUTATION,
   UPDATE_WATERING_TRIGGERS_MUTATION,
   UPDATE_ZONE_ADVANCED_MUTATION,
+  REMOVE_WEATHER_STATION_MUTATION,
   UPDATE_ZONE_STANDARD_MUTATION,
+  WEATHER_STATIONS_QUERY,
   UPDATE_ZONE_NOTE_MUTATION,
   WAKE_CONTROLLER_MUTATION,
   CONTROLLER_SCHEDULE_QUERY,
@@ -104,11 +114,13 @@ import {
   type SensorUpdatePayload,
   type SetBaselineValuesPayload,
   type StandardProgramRead,
+  type WateringProgramAdjustmentRead,
   type StandardProgramWritable,
   type StatusCodeAndSummary,
   type User,
   type WateringProgramWritable,
   type WateringTriggersRead,
+  type WeatherStationRead,
   type WateringTriggersWritable,
   type Zone,
   type ZoneCreatePayload,
@@ -180,6 +192,19 @@ export interface StartZoneOptions {
   learnFlowFromNextRun?: boolean;
 }
 
+export interface ProgramRunOptions {
+  customDurationSeconds?: number;
+  learnCurrentFromNextRun?: boolean;
+  learnFlowFromNextRun?: boolean;
+}
+
+export interface SelectedZonesRunOptions {
+  markRunAsScheduled?: boolean;
+  stackRuns?: boolean;
+  learnCurrentFromNextRun?: boolean;
+  learnFlowFromNextRun?: boolean;
+}
+
 export interface StartAllZonesOptions {
   durationSeconds?: number;
   markRunAsScheduled?: boolean;
@@ -245,6 +270,82 @@ export class HydrawiseApi {
         learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
       },
       (data) => data.startZone as StatusCodeAndSummary,
+    );
+  }
+
+  // Program-level run control. All four mirror startZone's mutate() path: the
+  // schema returns StatusCodeAndSummary!, so failures surface as
+  // HydrawiseMutationError with the API's own summary text.
+  //
+  // markRunAsScheduled is Boolean! on both program mutations (unlike startZone,
+  // where it defaults), so it is a required parameter rather than an option
+  // with a silent default.
+  async startZonesWithProgram(
+    programId: number,
+    markRunAsScheduled: boolean,
+    options: ProgramRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_ZONES_WITH_PROGRAM_MUTATION,
+      {
+        programId,
+        markRunAsScheduled,
+        customDuration: options.customDurationSeconds ?? null,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) => (data as { startZonesWithProgram: StatusCodeAndSummary }).startZonesWithProgram,
+    );
+  }
+
+  async startZonesWithProgramStartTime(
+    programStartTimeId: number,
+    markRunAsScheduled: boolean,
+    options: ProgramRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_ZONES_WITH_PROGRAM_START_TIME_MUTATION,
+      {
+        programStartTimeId,
+        markRunAsScheduled,
+        customDuration: options.customDurationSeconds ?? null,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) =>
+        (data as { startZonesWithProgramStartTime: StatusCodeAndSummary })
+          .startZonesWithProgramStartTime,
+    );
+  }
+
+  // zoneIds and runDurations are parallel arrays; length equality is enforced at
+  // the tool boundary (a mismatch is caller error, not an API concern).
+  async startSelectedZones(
+    zoneIds: number[],
+    runDurationsSeconds: number[],
+    options: SelectedZonesRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_SELECTED_ZONES_MUTATION,
+      {
+        zoneIds,
+        runDurations: runDurationsSeconds,
+        markRunAsScheduled: options.markRunAsScheduled ?? false,
+        stackRuns: options.stackRuns ?? true,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) => (data as { startSelectedZones: StatusCodeAndSummary }).startSelectedZones,
+    );
+  }
+
+  // Cancels in-progress AND queued runs for a zone; stopZone only stops the
+  // current run.
+  async cancelRunsForZone(zoneId: number): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      CANCEL_RUNS_FOR_ZONE_MUTATION,
+      { zoneId },
+      (data) => (data as { cancelRunsForZone: StatusCodeAndSummary }).cancelRunsForZone,
     );
   }
 
@@ -333,6 +434,72 @@ export class HydrawiseApi {
   // object on free accounts. These dedicated methods let callers handle the error
   // independently (e.g. backup.ts falls back to [] and emits a warn on subscription
   // errors, propagating all other errors).
+
+  // Weather stations feed the controller's watering triggers. Read path is
+  // separate from the controller query so a station fetch is not charged to
+  // every controller read.
+  async getWeatherStations(controllerId: number): Promise<WeatherStationRead[]> {
+    const data = await this.client.query<{
+      controller: { weatherStations: (WeatherStationRead | null)[] | null } | null;
+    }>(WEATHER_STATIONS_QUERY, { controllerId });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    return (data.controller.weatherStations ?? []).filter(
+      (w): w is WeatherStationRead => w != null,
+    );
+  }
+
+  // The three station mutations return bare Boolean (addVirtual is Boolean!),
+  // not StatusCodeAndSummary, so mutateRaw carries the false-to-error mapping
+  // that mutate() would otherwise do from the status field.
+  async addWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ADD_WEATHER_STATION_MUTATION,
+      { controllerId, weatherStationId },
+      (data) => {
+        const ok = (data as { addWeatherStation: boolean | null }).addWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `addWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async addVirtualWeatherStation(controllerId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ADD_VIRTUAL_WEATHER_STATION_MUTATION,
+      { controllerId },
+      (data) => {
+        const ok = (data as { addVirtualWeatherStation: boolean }).addVirtualWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `addVirtualWeatherStation returned false for controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async removeWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      REMOVE_WEATHER_STATION_MUTATION,
+      { controllerId, weatherStationId },
+      (data) => {
+        const ok = (data as { removeWeatherStation: boolean | null }).removeWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `removeWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
 
   // Controller event log. `length` and `page` mirror the schema arguments; the
   // caller decides how far back to walk rather than the API defaulting to 1000.
@@ -488,6 +655,64 @@ export class HydrawiseApi {
       (p) => p.id === programId && p.__typename === 'AdvancedProgram',
     );
     return found ?? null;
+  }
+
+  // Returns the conditional watering adjustments ATTACHED to a program (Standard or
+  // Advanced — the field is on the Program interface), with labels and the
+  // applicableSchedulingMethod detail that PROGRAMS_FULL_QUERY omits. For the
+  // account-wide catalog of AVAILABLE adjustments, see getWateringAdjustmentCatalog.
+  // Null when programId doesn't exist on this controller. Controller-not-found
+  // still throws HydrawiseNotFoundError.
+  async getConditionalWateringAdjustments(
+    controllerId: number,
+    programId: number,
+  ): Promise<WateringProgramAdjustmentRead[] | null> {
+    const data = await this.client.query<{
+      controller: {
+        programs:
+          | {
+              __typename: string;
+              id: number;
+              conditionalWateringAdjustments?: WateringProgramAdjustmentRead[] | null;
+            }[]
+          | null;
+      } | null;
+    }>(CONDITIONAL_WATERING_ADJUSTMENTS_QUERY, { controllerId });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    // A null `programs` array is an upstream contract violation (schema declares it
+    // non-null) or a partial-result failure — NOT a legitimately empty program list.
+    // Surface it as an API error rather than collapsing to `null`, which the tool
+    // would otherwise misreport as "program not found" (config_error) and send the
+    // user hunting for a nonexistent typo instead of retrying an upstream hiccup.
+    if (data.controller.programs == null) {
+      throw new HydrawiseAPIError(
+        `controller ${controllerId} returned a null programs list; cannot resolve program ${programId}`,
+      );
+    }
+    const found = data.controller.programs.find((p) => p.id === programId);
+    if (!found) return null;
+    // Defensive `?? []` on a schema-declared non-null array — same `!`-violation
+    // gotcha handled throughout the serializers.
+    return found.conditionalWateringAdjustments ?? [];
+  }
+
+  // The account-wide catalog of watering-program adjustments available on a
+  // controller (Configuration.controllerWateringProgramAdjustments). Verified live
+  // 2026-07-24: a strict superset of any program's attached set. Defensive at every
+  // level — configuration and the list are nullable in the schema.
+  async getWateringAdjustmentCatalog(
+    controllerId: number,
+  ): Promise<WateringProgramAdjustmentRead[]> {
+    const data = await this.client.query<{
+      configuration: {
+        controllerWateringProgramAdjustments?: (WateringProgramAdjustmentRead | null)[] | null;
+      } | null;
+    }>(CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY, { controllerId });
+    return (data.configuration?.controllerWateringProgramAdjustments ?? []).filter(
+      (a): a is WateringProgramAdjustmentRead => a != null,
+    );
   }
 
   async getPrograms(controllerId: number, includeZoneSpecific = true): Promise<ProgramListEntry[]> {

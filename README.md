@@ -160,6 +160,10 @@ All write tools are prefixed `PHYSICAL ACTION:` and accept `preview: true` to dr
 | `stop_zone` | Stop one zone |
 | `start_all_zones` | Run every zone on a controller |
 | `stop_all_zones` | Stop every zone on a controller |
+| `run_program` | Run every zone attached to a program, as one program run. Zones run sequentially |
+| `run_program_start_time` | Run the zones attached to a single program start time |
+| `run_selected_zones` | Run a chosen set of zones, each with its own run length |
+| `cancel_zone_runs` | Cancel the in-progress run and any queued runs for a zone |
 | `suspend_zone` | Suspend a zone's schedule (`days` or `until`) |
 | `resume_zone` | Clear a suspension |
 | `suspend_all_zones` | Suspend every zone |
@@ -177,6 +181,7 @@ All write tools are prefixed `PHYSICAL ACTION:` and accept `preview: true` to dr
 | `get_watering_triggers` / `update_watering_triggers` | Rain/temperature/humidity/wind triggers |
 | `list_programs` / `get_program` | List or fetch a program (Standard or Advanced detail) |
 | `list_program_start_times_for_zone` | Start times associated with a single zone |
+| `list_watering_adjustments` | Account-wide catalog of conditional adjustments (suspend/boost rules) behind `schedule_adjustment_ids`, with labels; optional `program_id` also returns the program's attached set |
 | `create_program_start_time` / `update_program_start_time` / `delete_program_start_time` | Program start time CRUD |
 | `create_standard_program` / `update_standard_program` / `delete_standard_program` | Standard program CRUD |
 | `create_watering_program` / `update_watering_program` / `delete_watering_program` | Time / Smart / VirtualSolarSync watering program CRUD |
@@ -204,6 +209,8 @@ All patch tools return `{ before, after, preview }` and support `preview: true` 
 | `update_controller_program_mode` | Switch STANDARD ↔ ADVANCED |
 | `hibernate_controller` / `wake_controller` | Sleep/wake the scheduler |
 | `create_expander` / `update_expander` / `delete_expander` | Hardware expander CRUD |
+| `list_weather_stations` | Stations feeding the controller's triggers, with distance and current observation |
+| `add_weather_station` / `add_virtual_weather_station` / `remove_weather_station` | Attach or detach the weather source behind the triggers |
 | `create_zone` / `delete_zone` | Zone CRUD (wraps `createZoneAdvanced` — the deprecated `createZone` is intentionally not wrapped) |
 
 ### Events (reads + PHYSICAL ACTION acknowledge)
@@ -239,7 +246,7 @@ All notes are typed (`fault | location | repair | comment`) with optional `pinne
 
 | Tool | Purpose |
 | --- | --- |
-| `dump_controller_snapshot` | Versioned JSON snapshot (`snapshot_version: 8`). See "Backup and restore" below. |
+| `dump_controller_snapshot` | Versioned JSON snapshot (`snapshot_version: 9`). See "Backup and restore" below. |
 
 ## Backup and restore
 

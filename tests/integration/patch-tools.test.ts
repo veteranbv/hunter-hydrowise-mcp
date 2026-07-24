@@ -147,6 +147,13 @@ const fakeZoneWithCycleSoak = {
   },
 };
 
+const fakeControllerStatus = {
+  online: true,
+  summary: 'All good!',
+  icon: 'ok.png',
+  accumulatedWaterSavings: 100,
+};
+
 const fakeControllerStandard = {
   id: 317416,
   deviceId: 5,
@@ -158,10 +165,13 @@ const fakeControllerStandard = {
   lastContactTime: null,
   location: null,
   settings: null,
+  status: fakeControllerStatus,
   masterZone: null,
   expanders: null,
   runTimeGroups: [],
   controllerNotes: [],
+  // Required by Controller since the v7 status fields; ControllerStatus is non-null per schema.
+  status: { online: true, summary: 'All good', icon: 'ok', accumulatedWaterSavings: 0 },
 };
 
 const fakeControllerAdvanced = {

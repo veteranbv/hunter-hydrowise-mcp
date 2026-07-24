@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { HydrawiseAPIError, HydrawiseMutationError, HydrawiseNotFoundError } from '../../src/errors.js';
+import {
+  HydrawiseAPIError,
+  HydrawiseMutationError,
+  HydrawiseNotFoundError,
+} from '../../src/errors.js';
 import { HydrawiseApi } from '../../src/hydrawise/api.js';
 import type { HydrawiseClient, Variables } from '../../src/hydrawise/client.js';
 import type { StatusCodeAndSummary } from '../../src/hydrawise/queries.js';
@@ -67,6 +71,65 @@ describe('HydrawiseApi', () => {
       learnCurrentFromNextRun: null,
       learnFlowFromNextRun: null,
     });
+  });
+
+  // Program-level run control. customDuration / runDurations are SECONDS,
+  // verified on a live controller 2026-07-24 (60 produced a 1-minute run).
+  it('startZonesWithProgram passes customDuration in seconds and requires markRunAsScheduled', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgram(6390589, true, { customDurationSeconds: 60 });
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      programId: 6390589,
+      markRunAsScheduled: true,
+      customDuration: 60,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('startZonesWithProgram sends customDuration: null when no override is given', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgram(6390589, false);
+    expect(harness.mutateCalls[0]?.variables).toMatchObject({
+      markRunAsScheduled: false,
+      customDuration: null,
+    });
+  });
+
+  it('startZonesWithProgramStartTime targets the start time id', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgramStartTime(555, true, { customDurationSeconds: 120 });
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      programStartTimeId: 555,
+      markRunAsScheduled: true,
+      customDuration: 120,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('startSelectedZones sends parallel zoneIds/runDurations arrays and defaults stackRuns true', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startSelectedZones([100, 101], [60, 300]);
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      zoneIds: [100, 101],
+      runDurations: [60, 300],
+      markRunAsScheduled: false,
+      stackRuns: true,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('cancelRunsForZone targets a single zone', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.cancelRunsForZone(100);
+    expect(harness.mutateCalls[0]?.variables).toEqual({ zoneId: 100 });
   });
 
   it('startZone forwards learn_flow_from_next_run when set', async () => {
@@ -672,6 +735,218 @@ describe('HydrawiseApi — Advanced program reads', () => {
     harness.setNextResult({ controller: null });
     const api = new HydrawiseApi(harness.client);
     await expect(api.getAdvancedProgram(317416, 6390999)).rejects.toThrow(HydrawiseNotFoundError);
+  });
+});
+
+describe('HydrawiseApi — conditional watering adjustments', () => {
+  function fakeQueryClient() {
+    const calls: Array<{ document: string; variables?: Variables }> = [];
+    let nextResult: unknown = null;
+    const client: HydrawiseClient = {
+      async query<TResult>(document: string, variables?: Variables): Promise<TResult> {
+        calls.push({ document, variables });
+        return nextResult as TResult;
+      },
+      async mutate() {
+        throw new Error('no mutations expected');
+      },
+      async mutateRaw() {
+        throw new Error('no mutations expected');
+      },
+    };
+    return { client, calls, setNextResult: (r: unknown) => { nextResult = r; } };
+  }
+
+  const adjustments = [
+    { id: 7, label: 'Water more often when hot', applicableSchedulingMethod: { value: 3, label: 'Virtual Solar Sync' } },
+    { id: 11, label: '0.3in+ rainfall last day', applicableSchedulingMethod: { value: null, label: null } },
+  ];
+  const standardEntry = { __typename: 'StandardProgram', id: 8675639, conditionalWateringAdjustments: adjustments };
+
+  it('dispatches CONDITIONAL_WATERING_ADJUSTMENTS_QUERY with controllerId and isContractor:false baked in', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    await api.getConditionalWateringAdjustments(317416, 8675639);
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(harness.calls[0]?.document).toContain('conditionalWateringAdjustments');
+    expect(harness.calls[0]?.document).toContain('isContractor: false');
+    expect(harness.calls[0]?.document).toContain('applicableSchedulingMethod');
+  });
+
+  it('returns the adjustments when the id resolves to a StandardProgram', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    const out = await api.getConditionalWateringAdjustments(317416, 8675639);
+    expect(out).toEqual(adjustments);
+  });
+
+  it('returns [] when the StandardProgram has a null adjustments array (schema `!` violation)', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      controller: { programs: [{ ...standardEntry, conditionalWateringAdjustments: null }] },
+    });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 8675639)).toEqual([]);
+  });
+
+  it('returns the adjustments when the id resolves to an AdvancedProgram (field is on the Program interface)', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      controller: {
+        programs: [{ __typename: 'AdvancedProgram', id: 8675639, conditionalWateringAdjustments: adjustments }],
+      },
+    });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 8675639)).toEqual(adjustments);
+  });
+
+  it('getWateringAdjustmentCatalog dispatches the configuration catalog query and filters null entries', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      configuration: { controllerWateringProgramAdjustments: [adjustments[0], null, adjustments[1]] },
+    });
+    const api = new HydrawiseApi(harness.client);
+    const out = await api.getWateringAdjustmentCatalog(317416);
+    expect(harness.calls[0]?.document).toContain('controllerWateringProgramAdjustments');
+    expect(harness.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(out).toEqual(adjustments);
+  });
+
+  it('getWateringAdjustmentCatalog returns [] when configuration is null', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ configuration: null });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getWateringAdjustmentCatalog(317416)).toEqual([]);
+  });
+
+  it('returns null when no matching id exists', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 9999999)).toBeNull();
+  });
+
+  it('throws HydrawiseNotFoundError when controller is null', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: null });
+    const api = new HydrawiseApi(harness.client);
+    await expect(api.getConditionalWateringAdjustments(317416, 8675639)).rejects.toThrow(
+      HydrawiseNotFoundError,
+    );
+  });
+
+  it('throws HydrawiseAPIError (not a null "not found") when programs array is null', async () => {
+    // A null programs list is an upstream contract violation, not an empty list — it must
+    // surface as api_error, not be misreported as config_error "program not found".
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: null } });
+    const api = new HydrawiseApi(harness.client);
+    await expect(api.getConditionalWateringAdjustments(317416, 8675639)).rejects.toThrow(
+      HydrawiseAPIError,
+    );
+  });
+});
+
+describe('HydrawiseApi — weather stations', () => {
+  function fakeRawClient() {
+    const calls: Array<{ document: string; variables?: Variables }> = [];
+    let queryResult: unknown = null;
+    let rawResult: Record<string, unknown> = {};
+    const client: HydrawiseClient = {
+      async query<TResult>(document: string, variables?: Variables): Promise<TResult> {
+        calls.push({ document, variables });
+        return queryResult as TResult;
+      },
+      async mutate(): Promise<StatusCodeAndSummary> {
+        throw new Error('weather station mutations use mutateRaw');
+      },
+      async mutateRaw<TResult>(
+        document: string,
+        variables: Variables,
+        extract: (data: Record<string, unknown>) => TResult,
+      ): Promise<TResult> {
+        calls.push({ document, variables });
+        return extract(rawResult);
+      },
+    };
+    return {
+      client,
+      calls,
+      setQueryResult: (r: unknown) => { queryResult = r; },
+      setRawResult: (r: Record<string, unknown>) => { rawResult = r; },
+    };
+  }
+
+  const station = {
+    id: 4242,
+    key: 'KAAA',
+    source: 7,
+    location: 'Somewhere',
+    distance: { value: 4.2, unit: 'mi' },
+    coordinates: { latitude: 1, longitude: 2 },
+    currentObservation: {
+      time: 't', updateTime: 'u',
+      temperature: { value: 70, unit: 'F' },
+      precipitation: { value: 0, unit: 'in' },
+      humidity: 40,
+      wind: { value: 5, unit: 'mph' },
+    },
+  };
+
+  it('getWeatherStations queries by controller and strips null entries', async () => {
+    const h = fakeRawClient();
+    h.setQueryResult({ controller: { weatherStations: [station, null] } });
+    const api = new HydrawiseApi(h.client);
+    const out = await api.getWeatherStations(317416);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(out).toEqual([station]);
+  });
+
+  it('getWeatherStations throws HydrawiseNotFoundError when the controller is null', async () => {
+    const h = fakeRawClient();
+    h.setQueryResult({ controller: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.getWeatherStations(1)).rejects.toThrow(HydrawiseNotFoundError);
+  });
+
+  it('addWeatherStation returns true on a true response', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: true });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.addWeatherStation(317416, 4242)).toBe(true);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416, weatherStationId: 4242 });
+  });
+
+  it('addWeatherStation raises HydrawiseMutationError on false (bare Boolean has no status field)', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: false });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.addWeatherStation(317416, 4242)).rejects.toThrow(HydrawiseMutationError);
+  });
+
+  it('addWeatherStation raises HydrawiseMutationError on null', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.addWeatherStation(1, 2)).rejects.toThrow(HydrawiseMutationError);
+  });
+
+  it('addVirtualWeatherStation takes only the controller id', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addVirtualWeatherStation: true });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.addVirtualWeatherStation(317416)).toBe(true);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416 });
+  });
+
+  it('removeWeatherStation raises HydrawiseMutationError on false', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ removeWeatherStation: false });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.removeWeatherStation(317416, 4242)).rejects.toThrow(HydrawiseMutationError);
   });
 });
 

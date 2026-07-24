@@ -123,6 +123,10 @@ interface SnapshotStandardProgram {
   scheduling_method: number | null;
   monthly_watering_adjustment_percents: number[];
   schedule_adjustment_ids: number[];
+  // {id, label} pairs for the same adjustments — present from snapshot v9 (labels
+  // let a restore detect that an account-managed id was redefined between capture
+  // and restore). Optional so pre-v9 snapshots remain readable.
+  schedule_adjustments?: Array<{ id: number; label: string }>;
   valid_from_epoch_seconds: number | null;
   valid_to_epoch_seconds: number | null;
   periodicity: { period: number; series_start_epoch_seconds: number | null } | null;
@@ -145,6 +149,8 @@ export interface SnapshotForRecipe {
     sensors: SnapshotSensor[];
     advanced_programs: Array<Record<string, unknown>>;
     controller_notes: SnapshotNote[];
+    // v9: account-wide adjustment catalog captured at snapshot time (optional for pre-v9).
+    watering_adjustment_catalog?: Array<{ id: number; label: string }>;
   };
 }
 
@@ -158,7 +164,7 @@ export function buildRestoreCaveats(snapshot: SnapshotForRecipe): string[] {
 
   // NOTE: The v5-compatibility guard below is intentionally unreachable in all current callers.
   // buildRestoreCaveats is called from backup.ts at capture time (always passes a freshly-built
-  // v8 snapshot) and from unit tests (all fixtures hardcode snapshot_version: 8), so
+  // v9 snapshot) and from unit tests (all fixtures hardcode snapshot_version: 9), so
   // snapshot_version < 6 can never be true here. The guard is retained so that any future
   // caller that passes an older snapshot gets the warning rather than silently proceeding.
   // The user-facing v5 incompatibility block lives in the restore-irrigation-backup skill
@@ -188,15 +194,50 @@ export function buildRestoreCaveats(snapshot: SnapshotForRecipe): string[] {
     );
   }
 
-  // Caveat: any zone references a reusable schedule. Account-managed records with
-  // no exposed CRUD; if the referenced id has been removed since capture, restore fails.
+  // Caveat: any zone OR program references a reusable schedule adjustment.
+  // Account-managed records with no exposed CRUD; the ids are opaque integers
+  // (issue #11) whose definitions can change without the id changing. Aggregating
+  // programs matters as much as zones: Standard programs carry their own
+  // schedule_adjustment_ids (that's where issue #11's empirical evidence lived).
   const scheduleAdjustmentIds = new Set<number>();
   for (const z of c.zones) {
     for (const id of z.settings?.schedule_adjustment_ids ?? []) scheduleAdjustmentIds.add(id);
   }
+  for (const p of c.programs) {
+    // Both serializeStandardProgram and serializeAdvancedProgram emit top-level
+    // schedule_adjustment_ids, so aggregate every program subtype — Advanced
+    // controllers carry the same silent-redefinition risk (zone-level ids are
+    // unreadable there, so programs are the only capture point).
+    const ids = (p as { schedule_adjustment_ids?: unknown }).schedule_adjustment_ids;
+    if (!Array.isArray(ids)) continue;
+    for (const id of ids) if (typeof id === 'number') scheduleAdjustmentIds.add(id);
+  }
   if (scheduleAdjustmentIds.size > 0) {
+    const idList = Array.from(scheduleAdjustmentIds)
+      .sort((a, b) => a - b)
+      .join(', ');
+    // Capture-time integrity check: the catalog should be a strict superset of every
+    // referenced id. Flag concretely when it isn't — either the catalog fetch degraded
+    // to [] at capture (see fetchAdjustmentCatalogSafe in backup.ts), or a referenced id
+    // has no catalog entry. The live capture-vs-restore drift comparison still belongs to
+    // the restore skill (it needs the target's live catalog); this only surfaces what the
+    // snapshot itself can already prove is off.
+    const catalog = c.watering_adjustment_catalog ?? [];
+    const catalogIds = new Set(catalog.map((a) => a.id));
+    const unbacked = Array.from(scheduleAdjustmentIds)
+      .filter((id) => !catalogIds.has(id))
+      .sort((a, b) => a - b);
+    let integrityNote = '';
+    if (catalog.length === 0) {
+      integrityNote =
+        ' NOTE: the captured watering_adjustment_catalog is EMPTY (the catalog fetch may have been unavailable at capture time), so this snapshot cannot back an id/label comparison on its own — read the target controller\'s live catalog and, if the source account is still reachable, a fresh capture, before trusting these ids.';
+    } else if (unbacked.length > 0) {
+      integrityNote = ` NOTE: referenced id(s) [${unbacked.join(
+        ', ',
+      )}] are NOT present in the captured watering_adjustment_catalog (which should be a superset) — treat these as especially suspect and confirm their meaning before restoring.`;
+    }
     caveats.push(
-      `Snapshot references reusable schedule_adjustment_ids: [${Array.from(scheduleAdjustmentIds).sort().join(', ')}]. These are account-managed with no exposed CRUD — if any has been removed between capture and restore, update_zone_settings will fail. Verify with the GUI before applying.`,
+      `Snapshot references reusable schedule_adjustment_ids: [${idList}] (on zones and/or programs). These are account-managed with no exposed CRUD, and the ids are opaque: an id that was removed makes the restore fail loudly, but an id whose definition CHANGED since capture restores silently wrong behavior. Programs in this snapshot carry schedule_adjustments {id, label} pairs and the controller carries watering_adjustment_catalog — before applying, call list_watering_adjustments on the target controller and compare id + label + applicable_scheduling_method against the snapshot's (the same label can appear under different ids for different scheduling methods); investigate any mismatch before restoring.${integrityNote}`,
     );
   }
 
@@ -230,6 +271,17 @@ export function buildRestoreCaveats(snapshot: SnapshotForRecipe): string[] {
   if (c.sensors.length > 0) {
     caveats.push(
       'FYI: Sensor input_number values reflect physical wiring at capture time. If sensor wiring has changed between capture and restore (e.g. rain sensor moved from SEN-1 to SEN-2), the create_sensor / update_sensor steps will write the wrong physical-pin assignment. Verify only if you suspect rewiring has occurred.',
+    );
+  }
+
+  // Caveat: weather station attachment drives which observations the watering
+  // triggers evaluate, and the snapshot does not capture it. Emitted only when
+  // the snapshot has triggers, since that is when the station actually matters:
+  // on a controller with no triggers, the attached station changes nothing that
+  // a restore would reproduce.
+  if (c.watering_triggers) {
+    caveats.push(
+      'Weather station attachment is not captured in this snapshot. The watering triggers below will be restored, but they evaluate against whatever weather station the target controller currently has attached, which may not be the station that was feeding them at capture time. Use list_weather_stations on the target before and after restoring, and add_weather_station / remove_weather_station if the source differs.',
     );
   }
 

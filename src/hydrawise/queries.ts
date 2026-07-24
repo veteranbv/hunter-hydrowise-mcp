@@ -332,6 +332,104 @@ export const START_ALL_ZONES_MUTATION = /* GraphQL */ `
   }
 `;
 
+/** GraphQL: run every zone attached to a program, as one program run.
+ *
+ * `markRunAsScheduled` is non-null in the schema, so callers must state it: true
+ * records the run as a scheduled run (counts against the program's schedule),
+ * false runs it as a manual/extra run.
+ *
+ * `customDuration` is SECONDS. Verified on a live controller 2026-07-24:
+ * dispatching this mutation with customDuration=60 produced runs reported by
+ * `getZoneRunsBetween` as duration=1 (minutes) with remainingTime counting down
+ * from ~60 (seconds). Same unit as `startZone.customRunDuration`.
+ *
+ * Also verified in that run: the mutation queues every zone attached to the
+ * program sequentially (staggered start times), not concurrently, and each zone
+ * receives the customDuration override.
+ */
+export const START_ZONES_WITH_PROGRAM_MUTATION = /* GraphQL */ `
+  mutation StartZonesWithProgram(
+    $programId: Int!
+    $markRunAsScheduled: Boolean!
+    $customDuration: Int
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startZonesWithProgram(
+      programId: $programId
+      markRunAsScheduled: $markRunAsScheduled
+      customDuration: $customDuration
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: run the zones attached to a single program start time. Same
+ * markRunAsScheduled and customDuration semantics as START_ZONES_WITH_PROGRAM_MUTATION. */
+export const START_ZONES_WITH_PROGRAM_START_TIME_MUTATION = /* GraphQL */ `
+  mutation StartZonesWithProgramStartTime(
+    $programStartTimeId: Int!
+    $markRunAsScheduled: Boolean!
+    $customDuration: Int
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startZonesWithProgramStartTime(
+      programStartTimeId: $programStartTimeId
+      markRunAsScheduled: $markRunAsScheduled
+      customDuration: $customDuration
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: run a chosen set of zones, each with its own duration. zoneIds and
+ * runDurations are parallel arrays; the API gives no guarantee about mismatched
+ * lengths, so the tool layer rejects them rather than letting Hydrawise decide.
+ * runDurations is SECONDS, verified live 2026-07-24: runDurations=[60] produced
+ * a run reported as duration=1 minute with remainingTime counting down from ~60. */
+export const START_SELECTED_ZONES_MUTATION = /* GraphQL */ `
+  mutation StartSelectedZones(
+    $zoneIds: [Int!]!
+    $runDurations: [Int!]!
+    $markRunAsScheduled: Boolean
+    $stackRuns: Boolean
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startSelectedZones(
+      zoneIds: $zoneIds
+      runDurations: $runDurations
+      markRunAsScheduled: $markRunAsScheduled
+      stackRuns: $stackRuns
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: cancel in-progress and queued runs for one zone. Distinct from
+ * stopZone, which stops the current run only. */
+export const CANCEL_RUNS_FOR_ZONE_MUTATION = /* GraphQL */ `
+  mutation CancelRunsForZone($zoneId: Int!) {
+    cancelRunsForZone(zoneId: $zoneId) {
+      status
+      summary
+    }
+  }
+`;
+
 export const STOP_ALL_ZONES_MUTATION = /* GraphQL */ `
   mutation StopAllZones($controllerId: Int!) {
     stopAllZones(controllerId: $controllerId) {
@@ -703,6 +801,105 @@ export const ZONE_FULL_QUERY = /* GraphQL */ `
 `;
 
 /** GraphQL: controller notes — fetched separately because controllerNotes is subscription-gated (returns a business-level GraphQL error on free accounts, which nulls the entire controller object when embedded in CONTROLLER_FIELDS). */
+/** GraphQL: weather stations attached to a controller.
+ *
+ * Kept out of CONTROLLER_FIELDS deliberately: every controller read would then
+ * pay for a station fetch that only the weather tools need.
+ *
+ * `distance` and the observation values are LocalizedValueType, so they carry
+ * account-preference units and are serialized as {value, unit} per the
+ * convention rather than getting a unit suffix.
+ */
+export const WEATHER_STATIONS_QUERY = /* GraphQL */ `
+  query WeatherStations($controllerId: Int!) {
+    controller(controllerId: $controllerId) {
+      weatherStations {
+        id
+        key
+        source
+        location
+        distance {
+          value
+          unit
+        }
+        coordinates {
+          latitude
+          longitude
+        }
+        currentObservation {
+          time
+          updateTime
+          temperature {
+            value
+            unit
+          }
+          precipitation {
+            value
+            unit
+          }
+          humidity
+          wind {
+            value
+            unit
+          }
+        }
+      }
+    }
+  }
+`;
+
+export interface WeatherStationRead {
+  id: number;
+  key: string;
+  source: number;
+  location: string | null;
+  distance: LocalizedValue | null;
+  coordinates: { latitude: number | null; longitude: number | null } | null;
+  currentObservation: {
+    time: string;
+    updateTime: string;
+    temperature: LocalizedValue | null;
+    precipitation: LocalizedValue | null;
+    humidity: number | null;
+    wind: LocalizedValue | null;
+  } | null;
+}
+
+/** GraphQL: attach an existing weather station by id. Returns bare Boolean, not
+ * StatusCodeAndSummary, so callers use mutateRaw and map false to an error. */
+export const ADD_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation AddWeatherStation($controllerId: Int!, $weatherStationId: Int!) {
+    addWeatherStation(controllerId: $controllerId, weatherStationId: $weatherStationId)
+  }
+`;
+
+/** GraphQL: attach a virtual (forecast-model) station centred on the controller's
+ * location. Schema declares Boolean! here, unlike the other three.
+ *
+ * Verified on a live account 2026-07-24, both slot states:
+ * - Slot already occupied: returns true and attaches nothing. The account is
+ *   capped at one station and Hydrawise no-ops rather than erroring.
+ * - Slot free: attaches, and the station it creates for a given controller
+ *   location is stable (same id and VIRTUAL-* key returned across a
+ *   remove-then-re-add cycle).
+ *
+ * Because the true-with-no-effect case exists, callers should re-read
+ * `list_weather_stations` after adding rather than trusting the boolean. */
+export const ADD_VIRTUAL_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation AddVirtualWeatherStation($controllerId: Int!) {
+    addVirtualWeatherStation(controllerId: $controllerId)
+  }
+`;
+
+/** GraphQL: detach one weather station. removeAllWeatherStations is intentionally
+ * not wrapped: one call wiping every station is not previewable per-station, and
+ * the AI can loop this instead. */
+export const REMOVE_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation RemoveWeatherStation($controllerId: Int!, $weatherStationId: Int!) {
+    removeWeatherStation(controllerId: $controllerId, weatherStationId: $weatherStationId)
+  }
+`;
+
 /** GraphQL: the controller's event log. `length` caps the number returned and
  * `page` walks back through history (schema defaults: 1000 and 0).
  *
@@ -1046,6 +1243,82 @@ export interface AdvancedProgramRead {
   // RunTimeGroup is nullable on AdvancedProgram (unlike StandardProgram.applications.runTimeGroup
   // which is non-null per-application).
   runTimeGroup: { id: number; name: string | null; duration: number } | null;
+}
+
+/** GraphQL: a program's conditional watering adjustments, with the
+ * applicableSchedulingMethod detail that PROGRAMS_FULL_QUERY intentionally omits
+ * (adding it there would bloat every get_program/snapshot fetch for a field only
+ * the list_watering_adjustments tool needs).
+ *
+ * Semantics (verified live on two accounts, 2026-07-24; see also issue #11's
+ * clear-then-read experiment): this per-program field returns the adjustments
+ * currently ATTACHED to the program. The account-wide catalog of AVAILABLE
+ * adjustments lives at Configuration.controllerWateringProgramAdjustments —
+ * see CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY. `scheduleAdjustmentIds`
+ * itself remains write-only. The field is declared on the Program interface,
+ * so both Standard and Advanced programs expose it. `isContractor` only
+ * switches label wording (false → account-parameterized labels like
+ * "0.3in+ rainfall last day"; true → generic contractor labels like
+ * "High rainfall last day"). We pass false — end-user MCP sessions want the
+ * parameterized labels. */
+export const CONDITIONAL_WATERING_ADJUSTMENTS_QUERY = /* GraphQL */ `
+  query ConditionalWateringAdjustments($controllerId: Int!) {
+    controller(controllerId: $controllerId) {
+      programs(includeZoneSpecific: true) {
+        __typename
+        id
+        ... on StandardProgram {
+          conditionalWateringAdjustments(controllerId: $controllerId, isContractor: false) {
+            id
+            label
+            applicableSchedulingMethod {
+              value
+              label
+            }
+          }
+        }
+        ... on AdvancedProgram {
+          conditionalWateringAdjustments(controllerId: $controllerId, isContractor: false) {
+            id
+            label
+            applicableSchedulingMethod {
+              value
+              label
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+/** GraphQL: the account-wide catalog of watering-program adjustments available
+ * on a controller (Configuration.controllerWateringProgramAdjustments). Verified
+ * live 2026-07-24: returns a strict superset of any program's attached set —
+ * e.g. entries for other scheduling methods that no program currently uses.
+ * Note ids are per-method even when labels repeat (the same label can appear
+ * under Time Based and Virtual Solar Sync with different ids), so restore
+ * verification should compare id + label + applicable_scheduling_method. */
+export const CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY = /* GraphQL */ `
+  query ControllerWateringAdjustmentCatalog($controllerId: Int!) {
+    configuration {
+      controllerWateringProgramAdjustments(controllerId: $controllerId, isContractor: false) {
+        id
+        label
+        applicableSchedulingMethod {
+          value
+          label
+        }
+      }
+    }
+  }
+`;
+
+export interface WateringProgramAdjustmentRead {
+  id: number;
+  label: string;
+  // Non-null wrapper per live introspection; inner value/label genuinely nullable.
+  applicableSchedulingMethod: { value: number | null; label: string | null };
 }
 
 /** GraphQL: program start times via wateringSettings on a zone (best available read path). */

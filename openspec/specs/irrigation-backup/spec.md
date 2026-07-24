@@ -86,12 +86,12 @@ When a controller is hibernated at capture time, the `_caveats` array in the sna
 
 ### Requirement: Snapshot envelope is versioned
 
-The snapshot JSON SHALL include `snapshot_version` as a top-level integer field as informational provenance. This change bumps the version to `8` to reflect the `accumulated_water_savings` field shape change from bare `Int` to `{value, unit}`.
+The snapshot JSON SHALL include `snapshot_version` as a top-level integer field as informational provenance. The current version is `9`: programs carry `schedule_adjustments` (`{id, label}` pairs alongside the bare `schedule_adjustment_ids`) and the controller carries `watering_adjustment_catalog` (the account-wide adjustment catalog with labels and applicable scheduling method), enabling capture-vs-restore verification of account-managed adjustment ids.
 
-#### Scenario: Snapshot version reflects the wrapped-savings generation
+#### Scenario: Snapshot version reflects the current generation
 
 - **WHEN** any client reads the JSON returned by `dump_controller_snapshot`
-- **THEN** the `snapshot_version` field is present and equal to `8`
+- **THEN** the `snapshot_version` field is present and equal to `9`
 
 #### Scenario: Older snapshots remain readable
 

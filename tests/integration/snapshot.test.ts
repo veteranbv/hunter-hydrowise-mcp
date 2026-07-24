@@ -131,7 +131,8 @@ const fakeStandardProgram: StandardProgramRead = {
   ignoreRainSensor: false,
   daysRun: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'],
   standardProgramDayPattern: 'interval',
-  periodicity: { period: 2, seriesStart: { value: 'Thu, 26 Jun 25 00:00:00 -0600' } },
+  // StandardProgramRead.periodicity.seriesStart is { timestamp: number } (epoch seconds).
+  periodicity: { period: 2, seriesStart: { timestamp: 1750914000 } },
   timeRange: { validFrom: null, validTo: null },
   conditionalWateringAdjustments: [],
   applications: [
@@ -229,13 +230,13 @@ async function callTool(app: ReturnType<typeof makeApp>, toolName: string, args:
   };
 }
 
-describe('dump_controller_snapshot v6', () => {
-  it('returns snapshot_version 8', async () => {
+describe('dump_controller_snapshot', () => {
+  it('returns snapshot_version 9', async () => {
     const app = makeApp();
     const resp = await callTool(app, 'dump_controller_snapshot', { controller_id: 317416 });
     expect(resp.result?.isError).toBeFalsy();
     const snap = JSON.parse(resp.result!.content[0]!.text) as { snapshot_version: number };
-    expect(snap.snapshot_version).toBe(8);
+    expect(snap.snapshot_version).toBe(9);
   });
 
   it('controller block includes location, time_zone, master_valve, expanders, modules, run_time_groups, controller_notes, device_id', async () => {
@@ -300,6 +301,25 @@ describe('dump_controller_snapshot v6', () => {
     const resp = await callTool(app, 'dump_controller_snapshot', { controller_id: 317416 });
     expect(resp.result?.isError).toBe(true);
     expect(resp.result?.content[0]?.text).toMatch(/^api_error: Snapshot integrity violation/);
+  });
+
+  it('degrades to watering_adjustment_catalog: [] (does NOT fail the snapshot) when the catalog fetch errors', async () => {
+    // The v9 catalog is a restore-verification convenience on an account-scoped path that
+    // may be gated on some tiers. A catalog error must NOT take down the whole snapshot —
+    // it degrades to [], mirroring the subscription-gated notes fallback.
+    const app = makeApp({
+      getWateringAdjustmentCatalog: async () => {
+        throw new HydrawiseAPIError('Feature is not available under your subscription.');
+      },
+    });
+    const resp = await callTool(app, 'dump_controller_snapshot', { controller_id: 317416 });
+    expect(resp.result?.isError).toBeFalsy();
+    const snap = JSON.parse(resp.result!.content[0]!.text) as {
+      snapshot_version: number;
+      controller: { watering_adjustment_catalog: unknown[] };
+    };
+    expect(snap.snapshot_version).toBe(9);
+    expect(snap.controller.watering_adjustment_catalog).toEqual([]);
   });
 
   it('program_type discriminator is consistent between thin entries and inlined details', async () => {

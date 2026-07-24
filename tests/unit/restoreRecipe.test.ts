@@ -13,7 +13,7 @@ import {
 
 function makeMinimalSnapshot(overrides: Partial<SnapshotForRecipe['controller']> = {}): SnapshotForRecipe {
   return {
-    snapshot_version: 8,
+    snapshot_version: 9,
     controller: {
       id: 317416,
       program_mode: 'STANDARD',
@@ -635,6 +635,126 @@ describe('buildRestoreCaveats', () => {
       }),
     );
     expect(caveats.some((c) => c.includes('reusable schedule_adjustment_ids') && c.includes('17') && c.includes('23'))).toBe(true);
+  });
+
+  it('aggregates program-level schedule_adjustment_ids into the reusable-adjustments caveat (issue #11 evidence was program-level)', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        programs: [
+          {
+            id: 6390589,
+            name: 'Lawn',
+            program_type: 'Standard',
+            schedule_adjustment_ids: [16, 17, 18],
+            schedule_adjustments: [
+              { id: 16, label: 'Forecast below 50°F' },
+              { id: 17, label: 'Wind above 25mph' },
+              { id: 18, label: '70%+ chance of rain' },
+            ],
+          },
+          // Advanced entries carry the same top-level field and must be
+          // aggregated too (Codex round-2 finding).
+          { id: 777, name: 'Adv', program_type: 'Advanced', schedule_adjustment_ids: [21] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toBeDefined();
+    expect(caveat).toContain('[16, 17, 18, 21]');
+    // Strengthened wording (issue #11 phase 2): distinguishes removed (loud) from
+    // redefined (silent) and points the restorer at the label-comparison workflow.
+    expect(caveat).toContain('CHANGED');
+    expect(caveat).toContain('list_watering_adjustments');
+  });
+
+  it('adds no integrity note when the captured catalog backs every referenced id', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [
+          { id: 16, label: 'Forecast below 50°F' },
+          { id: 17, label: 'Wind above 25mph' },
+          { id: 18, label: '70%+ chance of rain' },
+        ],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [16, 17, 18] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toBeDefined();
+    expect(caveat).not.toContain('NOT present');
+    expect(caveat).not.toContain('EMPTY');
+  });
+
+  it('flags referenced ids missing from a populated catalog (catalog should be a superset)', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [{ id: 16, label: 'Forecast below 50°F' }],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [16, 99] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toContain('NOT present in the captured watering_adjustment_catalog');
+    expect(caveat).toContain('[99]');
+  });
+
+  it('flags an empty captured catalog (e.g. catalog fetch degraded) when ids are referenced', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [17] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toContain('watering_adjustment_catalog is EMPTY');
+  });
+
+  it('numerically sorts aggregated schedule_adjustment_ids across zones and programs', () => {
+    const zoneSettings = {
+      zone_id: 100, name: 'Front', number: 1, icon: null, master_valve_override: -1,
+      watering_adjustment_percent: 100, cycle_soak_enable: false,
+      cycle_custom_time_minutes: null, soak_custom_time_minutes: null,
+      flow_monitoring_method: null, current_monitoring_method: null,
+      flow_monitoring_value: null, current_monitoring_value: null,
+      watering_mode: null, global_master_valve: null,
+      schedule_adjustment_ids: [102, 7],
+      watering_type: null, run_time_minutes: null, watering_frequency_mode: null,
+      fixed_watering_frequency_seconds: null, smart_watering_frequency_seconds: null,
+      virtual_solar_sync_watering_frequency_seconds: null,
+      run_next_available_start_time: null, pre_configured_watering_schedule_id: null,
+      monthly_adjustment_percents: null, sensor_ids: null,
+      reusable_schedule: null, reusable_schedule_name: null,
+      _unreadable_fields: [],
+    };
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        zones: [{ id: 100, name: 'Front', number: 1, program_start_times: [], settings: zoneSettings }],
+        programs: [
+          { id: 1, name: 'P', program_type: 'Standard', schedule_adjustment_ids: [11] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    // Numeric order (7, 11, 102) — a lexicographic sort would produce [102, 11, 7].
+    expect(caveat).toContain('[7, 11, 102]');
+  });
+
+  it('warns that weather station attachment is not captured when triggers are present', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({ watering_triggers: { suspend_water_temperature: { value: 50, unit: 'F' } } }),
+    );
+    const caveat = caveats.find((c) => c.includes('Weather station attachment'));
+    expect(caveat).toBeDefined();
+    expect(caveat).toContain('list_weather_stations');
+  });
+
+  it('omits the weather station caveat when the controller has no watering triggers', () => {
+    const caveats = buildRestoreCaveats(makeMinimalSnapshot({ watering_triggers: null }));
+    expect(caveats.some((c) => c.includes('Weather station attachment'))).toBe(false);
   });
 
   it('emits a caveat when sensors reference custom types (customer_id non-null and non-zero)', () => {

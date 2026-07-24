@@ -2,7 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { HydrawiseAPIError } from '../errors.js';
 import type { HydrawiseApi } from '../hydrawise/api.js';
-import type { ControllerNoteRead, ZoneNoteRead } from '../hydrawise/queries.js';
+import type {
+  ControllerNoteRead,
+  WateringProgramAdjustmentRead,
+  ZoneNoteRead,
+} from '../hydrawise/queries.js';
 import type { Logger } from '../logger.js';
 import {
   serializeAdvancedProgram,
@@ -13,6 +17,7 @@ import {
   serializeSensorZoneRefsForZone,
   serializeStandardProgram,
   serializeUser,
+  serializeWateringAdjustment,
   serializeWateringTriggers,
   serializeZone,
   serializeZoneSettings,
@@ -42,8 +47,14 @@ import { jsonResult, runTool } from './_helpers.js';
 //   v5: + _restore_recipe[] + _caveats[] at the envelope top level
 //   v6: + unit-suffix renaming convention applied across all fixed-unit numeric fields
 //   v7: + hibernate_status, status_summary, status_icon, accumulated_water_savings in controller header
-//   v8: + accumulated_water_savings wrapped as {value, unit} (inferred from location.country) (this version)
-export const SNAPSHOT_VERSION = 8;
+//   v8: + accumulated_water_savings wrapped as {value, unit} (inferred from location.country)
+//   v9: + programs[].schedule_adjustments {id, label} pairs alongside the bare
+//       schedule_adjustment_ids, and controller.watering_adjustment_catalog (the
+//       account-wide catalog from Configuration.controllerWateringProgramAdjustments).
+//       Labels + catalog are the handles a restore has for detecting that an
+//       account-managed adjustment id was redefined between capture and restore;
+//       see issue #11 (this version)
+export const SNAPSHOT_VERSION = 9;
 const PACKAGE_VERSION = '0.3.0';
 
 // The runtime `snapshot_version` field is the version contract — the type alias is NOT.
@@ -56,7 +67,7 @@ const PACKAGE_VERSION = '0.3.0';
 // `_restore_recipe` is always emitted (empty array on a controller with nothing to restore),
 // keeping the shape stable for AI consumers that don't want to special-case empty controllers.
 // `_caveats` is similarly always emitted (empty array if no warnings apply).
-export interface ControllerSnapshotV8 {
+export interface ControllerSnapshotV9 {
   snapshot_version: typeof SNAPSHOT_VERSION;
   captured_at: string;
   server_version: string;
@@ -68,6 +79,7 @@ export interface ControllerSnapshotV8 {
     watering_triggers: Record<string, unknown> | null;
     sensors: Array<Record<string, unknown>>;
     advanced_programs: Array<Record<string, unknown>>;
+    watering_adjustment_catalog: Array<Record<string, unknown>>;
     controller_notes: Array<Record<string, unknown>>;
   };
   _restore_recipe: RestoreStep[];
@@ -123,6 +135,30 @@ async function fetchZoneNotesSafe(
   }
 }
 
+// The account-wide adjustment catalog is a restore-verification convenience, not core
+// backup data. Like notes above, it queries an account-scoped path that may be gated or
+// otherwise error on some tiers — and it was validated live only against full-subscription
+// accounts. Guard it so a catalog failure degrades to [] instead of failing the ENTIRE
+// snapshot (zones, programs, settings, sensors, notes) for a non-essential field.
+async function fetchAdjustmentCatalogSafe(
+  api: HydrawiseApi,
+  controllerId: number,
+  logger?: Logger,
+): Promise<WateringProgramAdjustmentRead[]> {
+  try {
+    return await api.getWateringAdjustmentCatalog(controllerId);
+  } catch (err) {
+    if (err instanceof HydrawiseAPIError) {
+      logger?.warn(
+        'snapshot: watering adjustment catalog unavailable, captured as []',
+        { controller_id: controllerId, error: err.message },
+      );
+      return [];
+    }
+    throw err;
+  }
+}
+
 const Input = { controller_id: z.number().int() };
 
 export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger?: Logger): void {
@@ -130,7 +166,7 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
     'dump_controller_snapshot',
     {
       description:
-        'Snapshot one controller as a versioned JSON document (snapshot_version: 8). Captures: user, controller header (id, device_id, model, hardware, location, timezone, master valve, expanders, modules, run-time-group catalog, controller notes), zones with their writable settings (cycle/soak, monitoring observed values with units, master-valve override, zone notes, sensor cross-references, per-zone advanced_program reference for ADVANCED-mode zones, plus a _unreadable_fields array listing writable-but-not-readable field names), programs (BOTH Standard AND Advanced are now inlined with full subtype-specific detail), program start times per zone, seasonal adjustments, watering triggers (with units captured), sensors (controller.sensors[] with full detail; per-zone sensors[] denormalised cross-references), and advanced_programs (empty on STANDARD-mode, populated on ADVANCED with inlined AdvancedProgram details). The envelope additionally embeds `_restore_recipe` (an ordered list of {order, tool, args, depends_on, notes} restore steps the AI follows to apply this snapshot — preview each step, confirm with user, then execute) and `_caveats` (string warnings about known restore limitations: unreadable fields, custom-type id reallocation, reusable schedule references, hardware re-wiring, unit-pref drift). Use the .claude/skills/restore-irrigation-backup skill to orchestrate the restore. Read-only; no mutations.',
+        'Snapshot one controller as a versioned JSON document (snapshot_version: 9). Captures: user, controller header (id, device_id, model, hardware, location, timezone, master valve, expanders, modules, run-time-group catalog, controller notes), zones with their writable settings (cycle/soak, monitoring observed values with units, master-valve override, zone notes, sensor cross-references, per-zone advanced_program reference for ADVANCED-mode zones, plus a _unreadable_fields array listing writable-but-not-readable field names), programs (BOTH Standard AND Advanced are now inlined with full subtype-specific detail), program start times per zone, seasonal adjustments, watering triggers (with units captured), sensors (controller.sensors[] with full detail; per-zone sensors[] denormalised cross-references), and advanced_programs (empty on STANDARD-mode, populated on ADVANCED with inlined AdvancedProgram details). The envelope additionally embeds `_restore_recipe` (an ordered list of {order, tool, args, depends_on, notes} restore steps the AI follows to apply this snapshot — preview each step, confirm with user, then execute) and `_caveats` (string warnings about known restore limitations: unreadable fields, custom-type id reallocation, reusable schedule references, hardware re-wiring, unit-pref drift). Use the .claude/skills/restore-irrigation-backup skill to orchestrate the restore. Read-only; no mutations.',
       inputSchema: Input,
     },
     async ({ controller_id }) =>
@@ -149,6 +185,7 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
             controllerSensors,
             controllerNotes,
             zoneNotesByZone,
+            adjustmentCatalog,
           ] = await Promise.all([
             Promise.all(
               zones.map(async (z) => ({ zone_id: z.id, settings: await api.getZoneFull(z.id) })),
@@ -177,6 +214,10 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
                 notes: await fetchZoneNotesSafe(api, z.id, logger),
               })),
             ),
+            // Account-wide adjustment catalog (v9) - lets a restore compare capture-time
+            // id/label/method against the live catalog (see _caveats). Guarded so a
+            // catalog failure degrades to [] rather than failing the whole snapshot.
+            fetchAdjustmentCatalogSafe(api, controller_id, logger),
           ]);
 
           // Inline full program details — dispatch on program_type. Standard programs use
@@ -263,7 +304,7 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
             };
           });
 
-          const baseEnvelope: Omit<ControllerSnapshotV8, '_restore_recipe' | '_caveats'> = {
+          const baseEnvelope: Omit<ControllerSnapshotV9, '_restore_recipe' | '_caveats'> = {
             snapshot_version: SNAPSHOT_VERSION,
             captured_at: new Date().toISOString(),
             server_version: PACKAGE_VERSION,
@@ -280,6 +321,7 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
               // on ADVANCED-mode. Always emitted (not omitted) so consumers can rely on the
               // key existing — convention matches sensors[] above.
               advanced_programs: advancedProgramsInlined,
+              watering_adjustment_catalog: adjustmentCatalog.map(serializeWateringAdjustment),
             },
           };
 
@@ -295,7 +337,7 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
           const recipe = buildRestoreRecipe(baseEnvelope as unknown as SnapshotForRecipe);
           const caveats = buildRestoreCaveats(baseEnvelope as unknown as SnapshotForRecipe);
 
-          const snapshot: ControllerSnapshotV8 = {
+          const snapshot: ControllerSnapshotV9 = {
             ...baseEnvelope,
             _restore_recipe: recipe,
             _caveats: caveats,

@@ -1,15 +1,15 @@
 #!/usr/bin/env tsx
 // Quick probe to introspect what each WateringProgramAdjustment ID actually
-// configures on the live account. Surfaces the labels for IDs like [16, 17, 18]
-// that appear in schedule_adjustment_ids on programs.
+// configures on the live account. Surfaces the labels for the opaque integer
+// ids that appear in schedule_adjustment_ids on programs.
 //
 // Run: HYDRAWISE_USERNAME=... HYDRAWISE_PASSWORD=... npx tsx scripts/probe-adjustments.ts
+// Optionally set HYDRAWISE_PROBE_CONTROLLER_ID to target a specific controller;
+// defaults to the first controller on the account.
 import 'dotenv/config';
 import { loadConfig } from '../src/config.js';
 import { Auth } from '../src/hydrawise/auth.js';
 import { GraphQLClient } from 'graphql-request';
-
-const CONTROLLER_ID = 317416; // Heller Tufts
 
 async function main() {
   const config = loadConfig();
@@ -20,12 +20,19 @@ async function main() {
     headers: { Authorization: authHeader },
   });
 
-  // Field is on individual program types (not on Controller). Query the
-  // Lawn program (StandardProgram, id 6390589) and ask for its
-  // conditionalWateringAdjustments — which returns ALL available adjustments
-  // applicable to that program's scheduling method (not just the ones currently
-  // attached). The user's currently-applied IDs [16, 17, 18] should appear
-  // in this catalog, labeled with what they actually do.
+  const envControllerId = process.env.HYDRAWISE_PROBE_CONTROLLER_ID
+    ? Number.parseInt(process.env.HYDRAWISE_PROBE_CONTROLLER_ID, 10)
+    : null;
+
+  // Field is on individual program types (not on Controller). Ask each Standard
+  // program for its conditionalWateringAdjustments. Semantics verified live on
+  // two accounts (2026-07-24) plus the clear-then-read experiment in issue #11:
+  // the field returns the adjustments currently ATTACHED to the program, not an
+  // account-wide catalog of available adjustments (no such read path exists —
+  // scheduleAdjustmentIds is write-only in the schema). isContractor only
+  // switches label wording: false → account-parameterized labels ("0.3in+
+  // rainfall last day"), true → generic contractor labels ("High rainfall
+  // last day").
   const query = `
     query ProbeAdjustments($controllerId: Int!) {
       me {
@@ -52,6 +59,23 @@ async function main() {
     }
   `;
 
+  // Resolve the target controller: env override, else the first on the account.
+  const controllersResult = await client.request<{
+    me: { controllers: { id: number; name: string }[] };
+  }>(`query { me { controllers { id name } } }`);
+  const controllers = controllersResult.me.controllers;
+  if (controllers.length === 0) {
+    console.error('No controllers on this account.');
+    process.exit(1);
+  }
+  const target = envControllerId
+    ? controllers.find((c) => c.id === envControllerId)
+    : controllers[0];
+  if (!target) {
+    console.error(`Controller ${envControllerId} not found on this account.`);
+    process.exit(1);
+  }
+
   const result = await client.request<{
     me: {
       controllers: {
@@ -61,7 +85,6 @@ async function main() {
           __typename: string;
           id: number;
           name: string;
-          scheduleAdjustmentIds?: number[];
           conditionalWateringAdjustments?: {
             id: number;
             label: string;
@@ -70,40 +93,34 @@ async function main() {
         }[];
       }[];
     };
-  }>(query, { controllerId: CONTROLLER_ID });
+  }>(query, { controllerId: target.id });
 
   for (const controller of result.me.controllers) {
-    if (controller.id !== CONTROLLER_ID) continue;
+    if (controller.id !== target.id) continue;
     console.log(`\nController: ${controller.name} (id ${controller.id})\n`);
 
-    // Collect catalog from first StandardProgram that returns adjustments
-    let catalog:
-      | {
-          id: number;
-          label: string;
-          applicableSchedulingMethod: { value: number | null; label: string | null };
-        }[]
-      | undefined;
+    let any = false;
     for (const p of controller.programs) {
-      if (p.__typename === 'StandardProgram' && p.conditionalWateringAdjustments) {
-        catalog = p.conditionalWateringAdjustments;
-        break;
+      if (p.__typename !== 'StandardProgram') continue;
+      any = true;
+      const attached = p.conditionalWateringAdjustments ?? [];
+      console.log(`Program "${p.name}" (id ${p.id}) — attached adjustments:`);
+      if (attached.length === 0) {
+        console.log('  (none attached)');
       }
-    }
-
-    if (catalog) {
-      console.log('Full WateringProgramAdjustment catalog for this controller:\n');
-      for (const adj of catalog) {
+      for (const adj of attached) {
         console.log(
           `  id=${adj.id}  label="${adj.label}"  scheduling_method=${adj.applicableSchedulingMethod.value} (${adj.applicableSchedulingMethod.label})`,
         );
       }
-    } else {
-      console.log('No conditionalWateringAdjustments returned by any StandardProgram.');
     }
-
-    console.log('\nCurrent schedule_adjustment_ids (from earlier MCP reads): [16, 17, 18] on Drip, Lawn, Lawn Early');
-    console.log('Match against the catalog above to interpret what each ID configures.');
+    if (!any) {
+      console.log('No Standard programs on this controller.');
+    }
+    console.log(
+      '\nThese are the adjustments currently ATTACHED per program (not an account catalog).',
+    );
+    console.log('Match ids against schedule_adjustment_ids from get_program / snapshots.');
   }
 }
 
