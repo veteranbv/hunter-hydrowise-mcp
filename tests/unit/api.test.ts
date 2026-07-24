@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HydrawiseMutationError, HydrawiseNotFoundError } from '../../src/errors.js';
+import { HydrawiseAPIError, HydrawiseMutationError, HydrawiseNotFoundError } from '../../src/errors.js';
 import { HydrawiseApi } from '../../src/hydrawise/api.js';
 import type { HydrawiseClient, Variables } from '../../src/hydrawise/client.js';
 import type { StatusCodeAndSummary } from '../../src/hydrawise/queries.js';
@@ -732,6 +732,22 @@ describe('HydrawiseApi — controller events', () => {
     const out = await api.getControllerAlertEvents(317416, 'cursor-1');
     expect(h.calls[0]?.variables).toEqual({ controllerId: 317416, after: 'cursor-1' });
     expect(out[0]?.isAlert).toBe(true);
+  });
+
+  it('getControllerAlertEvents throws api_error on a null alerts array (schema declares it non-null)', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { alerts: null } });
+    const api = new HydrawiseApi(h.client);
+    // Controller.events is [Event] so null means "none"; Controller.alerts is
+    // [Event!]! so null is an upstream contract violation, not an empty list.
+    await expect(api.getControllerAlertEvents(1, '')).rejects.toThrow(HydrawiseAPIError);
+  });
+
+  it('getControllerEvents still treats a null events array as empty (schema allows null)', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { events: null } });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.getControllerEvents(1, 10, 0)).toEqual([]);
   });
 
   it('acknowledgeEvent passes the string event id', async () => {

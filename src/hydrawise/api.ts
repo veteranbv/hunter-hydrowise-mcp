@@ -1,4 +1,4 @@
-import { HydrawiseMutationError, HydrawiseNotFoundError } from '../errors.js';
+import { HydrawiseAPIError, HydrawiseMutationError, HydrawiseNotFoundError } from '../errors.js';
 import type { HydrawiseClient } from './client.js';
 import {
   CONTROLLER_NOTES_QUERY,
@@ -355,7 +355,17 @@ export class HydrawiseApi {
     if (!data.controller) {
       throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
     }
-    return (data.controller.alerts ?? []).filter((e): e is EventRead => e != null);
+    // Controller.alerts is [Event!]! in the schema, so unlike Controller.events
+    // ([Event], where null legitimately means "none") a null here is an upstream
+    // `!`-violation. Degrading it to [] would report "no alert events" for what is
+    // actually a failed read. Same reasoning as getConditionalWateringAdjustments
+    // (skialpine ce5d310e).
+    if (data.controller.alerts == null) {
+      throw new HydrawiseAPIError(
+        `Hydrawise returned null for controller ${controllerId} alerts, which the schema declares non-null ([Event!]!)`,
+      );
+    }
+    return data.controller.alerts.filter((e): e is EventRead => e != null);
   }
 
   // Both acknowledge mutations return bare Boolean, so mutateRaw carries the
