@@ -216,8 +216,28 @@ export function buildRestoreCaveats(snapshot: SnapshotForRecipe): string[] {
     const idList = Array.from(scheduleAdjustmentIds)
       .sort((a, b) => a - b)
       .join(', ');
+    // Capture-time integrity check: the catalog should be a strict superset of every
+    // referenced id. Flag concretely when it isn't — either the catalog fetch degraded
+    // to [] at capture (see fetchAdjustmentCatalogSafe in backup.ts), or a referenced id
+    // has no catalog entry. The live capture-vs-restore drift comparison still belongs to
+    // the restore skill (it needs the target's live catalog); this only surfaces what the
+    // snapshot itself can already prove is off.
+    const catalog = c.watering_adjustment_catalog ?? [];
+    const catalogIds = new Set(catalog.map((a) => a.id));
+    const unbacked = Array.from(scheduleAdjustmentIds)
+      .filter((id) => !catalogIds.has(id))
+      .sort((a, b) => a - b);
+    let integrityNote = '';
+    if (catalog.length === 0) {
+      integrityNote =
+        ' NOTE: the captured watering_adjustment_catalog is EMPTY (the catalog fetch may have been unavailable at capture time), so this snapshot cannot back an id/label comparison on its own — read the target controller\'s live catalog and, if the source account is still reachable, a fresh capture, before trusting these ids.';
+    } else if (unbacked.length > 0) {
+      integrityNote = ` NOTE: referenced id(s) [${unbacked.join(
+        ', ',
+      )}] are NOT present in the captured watering_adjustment_catalog (which should be a superset) — treat these as especially suspect and confirm their meaning before restoring.`;
+    }
     caveats.push(
-      `Snapshot references reusable schedule_adjustment_ids: [${idList}] (on zones and/or programs). These are account-managed with no exposed CRUD, and the ids are opaque: an id that was removed makes the restore fail loudly, but an id whose definition CHANGED since capture restores silently wrong behavior. Programs in this snapshot carry schedule_adjustments {id, label} pairs and the controller carries watering_adjustment_catalog — before applying, call list_watering_adjustments on the target controller and compare id + label + applicable_scheduling_method against the snapshot's (the same label can appear under different ids for different scheduling methods); investigate any mismatch before restoring.`,
+      `Snapshot references reusable schedule_adjustment_ids: [${idList}] (on zones and/or programs). These are account-managed with no exposed CRUD, and the ids are opaque: an id that was removed makes the restore fail loudly, but an id whose definition CHANGED since capture restores silently wrong behavior. Programs in this snapshot carry schedule_adjustments {id, label} pairs and the controller carries watering_adjustment_catalog — before applying, call list_watering_adjustments on the target controller and compare id + label + applicable_scheduling_method against the snapshot's (the same label can appear under different ids for different scheduling methods); investigate any mismatch before restoring.${integrityNote}`,
     );
   }
 

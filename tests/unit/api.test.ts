@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { HydrawiseMutationError, HydrawiseNotFoundError } from '../../src/errors.js';
+import {
+  HydrawiseAPIError,
+  HydrawiseMutationError,
+  HydrawiseNotFoundError,
+} from '../../src/errors.js';
 import { HydrawiseApi } from '../../src/hydrawise/api.js';
 import type { HydrawiseClient, Variables } from '../../src/hydrawise/client.js';
 import type { StatusCodeAndSummary } from '../../src/hydrawise/queries.js';
@@ -831,6 +835,17 @@ describe('HydrawiseApi — conditional watering adjustments', () => {
     const api = new HydrawiseApi(harness.client);
     await expect(api.getConditionalWateringAdjustments(317416, 8675639)).rejects.toThrow(
       HydrawiseNotFoundError,
+    );
+  });
+
+  it('throws HydrawiseAPIError (not a null "not found") when programs array is null', async () => {
+    // A null programs list is an upstream contract violation, not an empty list — it must
+    // surface as api_error, not be misreported as config_error "program not found".
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: null } });
+    const api = new HydrawiseApi(harness.client);
+    await expect(api.getConditionalWateringAdjustments(317416, 8675639)).rejects.toThrow(
+      HydrawiseAPIError,
     );
   });
 });

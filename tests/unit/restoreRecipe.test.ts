@@ -667,6 +667,52 @@ describe('buildRestoreCaveats', () => {
     expect(caveat).toContain('list_watering_adjustments');
   });
 
+  it('adds no integrity note when the captured catalog backs every referenced id', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [
+          { id: 16, label: 'Forecast below 50°F' },
+          { id: 17, label: 'Wind above 25mph' },
+          { id: 18, label: '70%+ chance of rain' },
+        ],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [16, 17, 18] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toBeDefined();
+    expect(caveat).not.toContain('NOT present');
+    expect(caveat).not.toContain('EMPTY');
+  });
+
+  it('flags referenced ids missing from a populated catalog (catalog should be a superset)', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [{ id: 16, label: 'Forecast below 50°F' }],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [16, 99] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toContain('NOT present in the captured watering_adjustment_catalog');
+    expect(caveat).toContain('[99]');
+  });
+
+  it('flags an empty captured catalog (e.g. catalog fetch degraded) when ids are referenced', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({
+        watering_adjustment_catalog: [],
+        programs: [
+          { id: 6390589, name: 'Lawn', program_type: 'Standard', schedule_adjustment_ids: [17] },
+        ],
+      }),
+    );
+    const caveat = caveats.find((c) => c.includes('reusable schedule_adjustment_ids'));
+    expect(caveat).toContain('watering_adjustment_catalog is EMPTY');
+  });
+
   it('numerically sorts aggregated schedule_adjustment_ids across zones and programs', () => {
     const zoneSettings = {
       zone_id: 100, name: 'Front', number: 1, icon: null, master_valve_override: -1,

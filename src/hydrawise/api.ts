@@ -1,4 +1,4 @@
-import { HydrawiseMutationError, HydrawiseNotFoundError } from '../errors.js';
+import { HydrawiseAPIError, HydrawiseMutationError, HydrawiseNotFoundError } from '../errors.js';
 import type { HydrawiseClient } from './client.js';
 import {
   CONTROLLER_NOTES_QUERY,
@@ -527,7 +527,17 @@ export class HydrawiseApi {
     if (!data.controller) {
       throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
     }
-    const found = (data.controller.programs ?? []).find((p) => p.id === programId);
+    // A null `programs` array is an upstream contract violation (schema declares it
+    // non-null) or a partial-result failure — NOT a legitimately empty program list.
+    // Surface it as an API error rather than collapsing to `null`, which the tool
+    // would otherwise misreport as "program not found" (config_error) and send the
+    // user hunting for a nonexistent typo instead of retrying an upstream hiccup.
+    if (data.controller.programs == null) {
+      throw new HydrawiseAPIError(
+        `controller ${controllerId} returned a null programs list; cannot resolve program ${programId}`,
+      );
+    }
+    const found = data.controller.programs.find((p) => p.id === programId);
     if (!found) return null;
     // Defensive `?? []` on a schema-declared non-null array — same `!`-violation
     // gotcha handled throughout the serializers.

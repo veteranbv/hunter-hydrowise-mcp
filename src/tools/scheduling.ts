@@ -414,15 +414,19 @@ export function registerSchedulingTools(
     },
     async ({ controller_id, program_id }) =>
       wrap('list_watering_adjustments', async () => {
-        const catalog = await api.getWateringAdjustmentCatalog(controller_id);
         if (program_id === undefined) {
+          const catalog = await api.getWateringAdjustmentCatalog(controller_id);
           return jsonResult({
             controller_id,
             catalog: catalog.map(serializeWateringAdjustment),
             attached: null,
           });
         }
-        const attached = await api.getConditionalWateringAdjustments(controller_id, program_id);
+        // catalog and attached are independent round-trips; fetch them concurrently.
+        const [catalog, attached] = await Promise.all([
+          api.getWateringAdjustmentCatalog(controller_id),
+          api.getConditionalWateringAdjustments(controller_id, program_id),
+        ]);
         if (!attached) {
           throw new ConfigError(
             `program ${program_id} not found on controller ${controller_id}`,

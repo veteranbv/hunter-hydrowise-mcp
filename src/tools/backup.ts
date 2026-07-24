@@ -2,7 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { HydrawiseAPIError } from '../errors.js';
 import type { HydrawiseApi } from '../hydrawise/api.js';
-import type { ControllerNoteRead, ZoneNoteRead } from '../hydrawise/queries.js';
+import type {
+  ControllerNoteRead,
+  WateringProgramAdjustmentRead,
+  ZoneNoteRead,
+} from '../hydrawise/queries.js';
 import type { Logger } from '../logger.js';
 import {
   serializeAdvancedProgram,
@@ -131,6 +135,30 @@ async function fetchZoneNotesSafe(
   }
 }
 
+// The account-wide adjustment catalog is a restore-verification convenience, not core
+// backup data. Like notes above, it queries an account-scoped path that may be gated or
+// otherwise error on some tiers — and it was validated live only against full-subscription
+// accounts. Guard it so a catalog failure degrades to [] instead of failing the ENTIRE
+// snapshot (zones, programs, settings, sensors, notes) for a non-essential field.
+async function fetchAdjustmentCatalogSafe(
+  api: HydrawiseApi,
+  controllerId: number,
+  logger?: Logger,
+): Promise<WateringProgramAdjustmentRead[]> {
+  try {
+    return await api.getWateringAdjustmentCatalog(controllerId);
+  } catch (err) {
+    if (err instanceof HydrawiseAPIError) {
+      logger?.warn(
+        'snapshot: watering adjustment catalog unavailable, captured as []',
+        { controller_id: controllerId, error: err.message },
+      );
+      return [];
+    }
+    throw err;
+  }
+}
+
 const Input = { controller_id: z.number().int() };
 
 export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger?: Logger): void {
@@ -187,8 +215,9 @@ export function registerBackupTools(server: McpServer, api: HydrawiseApi, logger
               })),
             ),
             // Account-wide adjustment catalog (v9) - lets a restore compare capture-time
-            // id/label/method against the live catalog (see _caveats).
-            api.getWateringAdjustmentCatalog(controller_id),
+            // id/label/method against the live catalog (see _caveats). Guarded so a
+            // catalog failure degrades to [] rather than failing the whole snapshot.
+            fetchAdjustmentCatalogSafe(api, controller_id, logger),
           ]);
 
           // Inline full program details — dispatch on program_type. Standard programs use
