@@ -7,6 +7,7 @@ import type { Logger } from '../logger.js';
 import {
   serializeLocation,
   serializeMasterValve,
+  serializeWeatherStation,
 } from './serializers.js';
 import { jsonResult, previewOrApply, runTool } from './_helpers.js';
 
@@ -107,6 +108,82 @@ export function registerControllerConfigTools(
 ): void {
   const wrap = (toolName: string, fn: () => Promise<ReturnType<typeof jsonResult>>) =>
     runTool(fn, { logger, toolName });
+
+  server.registerTool(
+    'list_weather_stations',
+    {
+      description:
+        "List the weather stations attached to a controller. These feed the controller's watering triggers, so a station's distance and current observation explain why temperature or rain triggers are firing (or not). Returns id, key, source, location, distance, coordinates, and the current observation (temperature, precipitation, humidity, wind) with units preserved. Read-only.",
+      inputSchema: { controller_id: z.number().int() },
+    },
+    async ({ controller_id }) =>
+      wrap('list_weather_stations', async () => {
+        const stations = await api.getWeatherStations(controller_id);
+        return jsonResult(stations.map(serializeWeatherStation));
+      }),
+  );
+
+  server.registerTool(
+    'add_weather_station',
+    {
+      description: `${PHYSICAL} attach an existing weather station to a controller by its station id. Changes which observations drive the controller's watering triggers. Use \`list_weather_stations\` first to see what is attached. Pass \`preview: true\` to dry-run.`,
+      inputSchema: {
+        controller_id: z.number().int(),
+        weather_station_id: z.number().int(),
+        preview: z.boolean().optional(),
+      },
+    },
+    async ({ controller_id, weather_station_id, preview }) =>
+      wrap('add_weather_station', async () =>
+        previewOrApply(
+          'addWeatherStation',
+          { controllerId: controller_id, weatherStationId: weather_station_id },
+          preview,
+          async () => api.addWeatherStation(controller_id, weather_station_id),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    'add_virtual_weather_station',
+    {
+      description: `${PHYSICAL} attach a virtual weather station to a controller. A virtual station is forecast-model based and centred on the controller's location rather than a physical station, so it needs the controller's geolocation set (see \`update_location\`). Verified on live hardware: with a free slot it attaches, but when the account's single station slot is already full it returns true and attaches nothing, so re-read \`list_weather_stations\` afterwards to confirm. Pass \`preview: true\` to dry-run.`,
+      inputSchema: {
+        controller_id: z.number().int(),
+        preview: z.boolean().optional(),
+      },
+    },
+    async ({ controller_id, preview }) =>
+      wrap('add_virtual_weather_station', async () =>
+        previewOrApply(
+          'addVirtualWeatherStation',
+          { controllerId: controller_id },
+          preview,
+          async () => api.addVirtualWeatherStation(controller_id),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    'remove_weather_station',
+    {
+      description: `${PHYSICAL} detach one weather station from a controller. Removing the station a trigger depends on changes irrigation behavior, so confirm with \`list_weather_stations\` first. To clear several, call this per station rather than in bulk, so each removal is previewable. Pass \`preview: true\` to dry-run.`,
+      inputSchema: {
+        controller_id: z.number().int(),
+        weather_station_id: z.number().int(),
+        preview: z.boolean().optional(),
+      },
+    },
+    async ({ controller_id, weather_station_id, preview }) =>
+      wrap('remove_weather_station', async () =>
+        previewOrApply(
+          'removeWeatherStation',
+          { controllerId: controller_id, weatherStationId: weather_station_id },
+          preview,
+          async () => api.removeWeatherStation(controller_id, weather_station_id),
+        ),
+      ),
+  );
 
   server.registerTool(
     'update_location',

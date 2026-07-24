@@ -209,6 +209,8 @@ All patch tools return `{ before, after, preview }` and support `preview: true` 
 | `update_controller_program_mode` | Switch STANDARD ↔ ADVANCED |
 | `hibernate_controller` / `wake_controller` | Sleep/wake the scheduler |
 | `create_expander` / `update_expander` / `delete_expander` | Hardware expander CRUD |
+| `list_weather_stations` | Stations feeding the controller's triggers, with distance and current observation |
+| `add_weather_station` / `add_virtual_weather_station` / `remove_weather_station` | Attach or detach the weather source behind the triggers |
 | `create_zone` / `delete_zone` | Zone CRUD (wraps `createZoneAdvanced` — the deprecated `createZone` is intentionally not wrapped) |
 
 ### Notes (reads + PHYSICAL ACTION writes)

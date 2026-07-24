@@ -801,6 +801,105 @@ export const ZONE_FULL_QUERY = /* GraphQL */ `
 `;
 
 /** GraphQL: controller notes — fetched separately because controllerNotes is subscription-gated (returns a business-level GraphQL error on free accounts, which nulls the entire controller object when embedded in CONTROLLER_FIELDS). */
+/** GraphQL: weather stations attached to a controller.
+ *
+ * Kept out of CONTROLLER_FIELDS deliberately: every controller read would then
+ * pay for a station fetch that only the weather tools need.
+ *
+ * `distance` and the observation values are LocalizedValueType, so they carry
+ * account-preference units and are serialized as {value, unit} per the
+ * convention rather than getting a unit suffix.
+ */
+export const WEATHER_STATIONS_QUERY = /* GraphQL */ `
+  query WeatherStations($controllerId: Int!) {
+    controller(controllerId: $controllerId) {
+      weatherStations {
+        id
+        key
+        source
+        location
+        distance {
+          value
+          unit
+        }
+        coordinates {
+          latitude
+          longitude
+        }
+        currentObservation {
+          time
+          updateTime
+          temperature {
+            value
+            unit
+          }
+          precipitation {
+            value
+            unit
+          }
+          humidity
+          wind {
+            value
+            unit
+          }
+        }
+      }
+    }
+  }
+`;
+
+export interface WeatherStationRead {
+  id: number;
+  key: string;
+  source: number;
+  location: string | null;
+  distance: LocalizedValue | null;
+  coordinates: { latitude: number | null; longitude: number | null } | null;
+  currentObservation: {
+    time: string;
+    updateTime: string;
+    temperature: LocalizedValue | null;
+    precipitation: LocalizedValue | null;
+    humidity: number | null;
+    wind: LocalizedValue | null;
+  } | null;
+}
+
+/** GraphQL: attach an existing weather station by id. Returns bare Boolean, not
+ * StatusCodeAndSummary, so callers use mutateRaw and map false to an error. */
+export const ADD_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation AddWeatherStation($controllerId: Int!, $weatherStationId: Int!) {
+    addWeatherStation(controllerId: $controllerId, weatherStationId: $weatherStationId)
+  }
+`;
+
+/** GraphQL: attach a virtual (forecast-model) station centred on the controller's
+ * location. Schema declares Boolean! here, unlike the other three.
+ *
+ * Verified on a live account 2026-07-24, both slot states:
+ * - Slot already occupied: returns true and attaches nothing. The account is
+ *   capped at one station and Hydrawise no-ops rather than erroring.
+ * - Slot free: attaches, and the station it creates for a given controller
+ *   location is stable (same id and VIRTUAL-* key returned across a
+ *   remove-then-re-add cycle).
+ *
+ * Because the true-with-no-effect case exists, callers should re-read
+ * `list_weather_stations` after adding rather than trusting the boolean. */
+export const ADD_VIRTUAL_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation AddVirtualWeatherStation($controllerId: Int!) {
+    addVirtualWeatherStation(controllerId: $controllerId)
+  }
+`;
+
+/** GraphQL: detach one weather station. removeAllWeatherStations is intentionally
+ * not wrapped: one call wiping every station is not previewable per-station, and
+ * the AI can loop this instead. */
+export const REMOVE_WEATHER_STATION_MUTATION = /* GraphQL */ `
+  mutation RemoveWeatherStation($controllerId: Int!, $weatherStationId: Int!) {
+    removeWeatherStation(controllerId: $controllerId, weatherStationId: $weatherStationId)
+  }
+`;
+
 export const CONTROLLER_NOTES_QUERY = /* GraphQL */ `
   query ControllerNotes($controllerId: Int!) {
     controller(controllerId: $controllerId) {

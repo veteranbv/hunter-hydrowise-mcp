@@ -5,6 +5,8 @@ import {
   CONTROLLER_QUERY,
   CONTROLLER_SENSORS_QUERY,
   CONTROLLERS_QUERY,
+  ADD_VIRTUAL_WEATHER_STATION_MUTATION,
+  ADD_WEATHER_STATION_MUTATION,
   CANCEL_RUNS_FOR_ZONE_MUTATION,
   CREATE_CONTROLLER_NOTE_MUTATION,
   CREATE_CUSTOM_SENSOR_TYPE_MUTATION,
@@ -63,7 +65,9 @@ import {
   UPDATE_VSS_WATERING_PROGRAM_MUTATION,
   UPDATE_WATERING_TRIGGERS_MUTATION,
   UPDATE_ZONE_ADVANCED_MUTATION,
+  REMOVE_WEATHER_STATION_MUTATION,
   UPDATE_ZONE_STANDARD_MUTATION,
+  WEATHER_STATIONS_QUERY,
   UPDATE_ZONE_NOTE_MUTATION,
   WAKE_CONTROLLER_MUTATION,
   CONTROLLER_SCHEDULE_QUERY,
@@ -111,6 +115,7 @@ import {
   type User,
   type WateringProgramWritable,
   type WateringTriggersRead,
+  type WeatherStationRead,
   type WateringTriggersWritable,
   type Zone,
   type ZoneCreatePayload,
@@ -424,6 +429,72 @@ export class HydrawiseApi {
   // object on free accounts. These dedicated methods let callers handle the error
   // independently (e.g. backup.ts falls back to [] and emits a warn on subscription
   // errors, propagating all other errors).
+
+  // Weather stations feed the controller's watering triggers. Read path is
+  // separate from the controller query so a station fetch is not charged to
+  // every controller read.
+  async getWeatherStations(controllerId: number): Promise<WeatherStationRead[]> {
+    const data = await this.client.query<{
+      controller: { weatherStations: (WeatherStationRead | null)[] | null } | null;
+    }>(WEATHER_STATIONS_QUERY, { controllerId });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    return (data.controller.weatherStations ?? []).filter(
+      (w): w is WeatherStationRead => w != null,
+    );
+  }
+
+  // The three station mutations return bare Boolean (addVirtual is Boolean!),
+  // not StatusCodeAndSummary, so mutateRaw carries the false-to-error mapping
+  // that mutate() would otherwise do from the status field.
+  async addWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ADD_WEATHER_STATION_MUTATION,
+      { controllerId, weatherStationId },
+      (data) => {
+        const ok = (data as { addWeatherStation: boolean | null }).addWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `addWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async addVirtualWeatherStation(controllerId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ADD_VIRTUAL_WEATHER_STATION_MUTATION,
+      { controllerId },
+      (data) => {
+        const ok = (data as { addVirtualWeatherStation: boolean }).addVirtualWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `addVirtualWeatherStation returned false for controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async removeWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      REMOVE_WEATHER_STATION_MUTATION,
+      { controllerId, weatherStationId },
+      (data) => {
+        const ok = (data as { removeWeatherStation: boolean | null }).removeWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `removeWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
 
   async getControllerNotes(controllerId: number): Promise<ControllerNoteRead[]> {
     const data = await this.client.query<{
