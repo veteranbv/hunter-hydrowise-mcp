@@ -13,7 +13,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "npm-shrinkwrap.json"
   ],
   "scripts": {
     "build": "tsup",
