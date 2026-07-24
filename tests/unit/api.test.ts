@@ -849,3 +849,103 @@ describe('HydrawiseApi — conditional watering adjustments', () => {
     );
   });
 });
+
+describe('HydrawiseApi — weather stations', () => {
+  function fakeRawClient() {
+    const calls: Array<{ document: string; variables?: Variables }> = [];
+    let queryResult: unknown = null;
+    let rawResult: Record<string, unknown> = {};
+    const client: HydrawiseClient = {
+      async query<TResult>(document: string, variables?: Variables): Promise<TResult> {
+        calls.push({ document, variables });
+        return queryResult as TResult;
+      },
+      async mutate(): Promise<StatusCodeAndSummary> {
+        throw new Error('weather station mutations use mutateRaw');
+      },
+      async mutateRaw<TResult>(
+        document: string,
+        variables: Variables,
+        extract: (data: Record<string, unknown>) => TResult,
+      ): Promise<TResult> {
+        calls.push({ document, variables });
+        return extract(rawResult);
+      },
+    };
+    return {
+      client,
+      calls,
+      setQueryResult: (r: unknown) => { queryResult = r; },
+      setRawResult: (r: Record<string, unknown>) => { rawResult = r; },
+    };
+  }
+
+  const station = {
+    id: 4242,
+    key: 'KAAA',
+    source: 7,
+    location: 'Somewhere',
+    distance: { value: 4.2, unit: 'mi' },
+    coordinates: { latitude: 1, longitude: 2 },
+    currentObservation: {
+      time: 't', updateTime: 'u',
+      temperature: { value: 70, unit: 'F' },
+      precipitation: { value: 0, unit: 'in' },
+      humidity: 40,
+      wind: { value: 5, unit: 'mph' },
+    },
+  };
+
+  it('getWeatherStations queries by controller and strips null entries', async () => {
+    const h = fakeRawClient();
+    h.setQueryResult({ controller: { weatherStations: [station, null] } });
+    const api = new HydrawiseApi(h.client);
+    const out = await api.getWeatherStations(317416);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(out).toEqual([station]);
+  });
+
+  it('getWeatherStations throws HydrawiseNotFoundError when the controller is null', async () => {
+    const h = fakeRawClient();
+    h.setQueryResult({ controller: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.getWeatherStations(1)).rejects.toThrow(HydrawiseNotFoundError);
+  });
+
+  it('addWeatherStation returns true on a true response', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: true });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.addWeatherStation(317416, 4242)).toBe(true);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416, weatherStationId: 4242 });
+  });
+
+  it('addWeatherStation raises HydrawiseMutationError on false (bare Boolean has no status field)', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: false });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.addWeatherStation(317416, 4242)).rejects.toThrow(HydrawiseMutationError);
+  });
+
+  it('addWeatherStation raises HydrawiseMutationError on null', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addWeatherStation: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.addWeatherStation(1, 2)).rejects.toThrow(HydrawiseMutationError);
+  });
+
+  it('addVirtualWeatherStation takes only the controller id', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ addVirtualWeatherStation: true });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.addVirtualWeatherStation(317416)).toBe(true);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416 });
+  });
+
+  it('removeWeatherStation raises HydrawiseMutationError on false', async () => {
+    const h = fakeRawClient();
+    h.setRawResult({ removeWeatherStation: false });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.removeWeatherStation(317416, 4242)).rejects.toThrow(HydrawiseMutationError);
+  });
+});

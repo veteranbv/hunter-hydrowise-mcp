@@ -59,7 +59,8 @@ export const UNIT_SUFFIXES: ReadonlySet<'_minutes' | '_seconds' | '_days' | '_pe
 // preference) use {value, unit} wrapping instead of suffixes and are also exempt from this list.
 export const IDENTIFIER_WHITELIST: ReadonlySet<string> = new Set([
   // Identifiers: singular FKs, plural FK arrays, and compound-id arrays
-  'id', 'zone_id', 'controller_id', 'program_id', 'program_start_time_id', 'sensor_id', 'expander_id',
+  'id', 'zone_id', 'controller_id', 'program_id', 'program_start_time_id', 'weather_station_id',
+  'sensor_id', 'expander_id',
   'model_id', 'run_time_group_id', 'custom_sensor_type_id', 'customer_id',
   'pre_configured_watering_schedule_id', 'note_id', 'icon_file_id',
   'zone_ids', 'sensor_ids', 'schedule_adjustment_ids',
@@ -586,6 +587,34 @@ export function serializeWateringAdjustment(
       value: a.applicableSchedulingMethod?.value ?? null,
       label: a.applicableSchedulingMethod?.label ?? null,
     },
+  };
+}
+
+// Weather station. distance and the observation values are LocalizedValueType,
+// so they stay {value, unit} rather than taking a unit suffix. `source` is an
+// opaque Hydrawise enum int (7 observed on a live account) and is passed through
+// unchanged; there is no documented mapping for it.
+export function serializeWeatherStation(
+  w: import('../hydrawise/queries.js').WeatherStationRead,
+): Record<string, unknown> {
+  return {
+    id: w.id,
+    key: w.key,
+    source: w.source,
+    location: w.location,
+    distance: w.distance ? { value: w.distance.value, unit: w.distance.unit } : null,
+    latitude: w.coordinates?.latitude ?? null,
+    longitude: w.coordinates?.longitude ?? null,
+    current_observation: w.currentObservation
+      ? {
+          time: w.currentObservation.time,
+          update_time: w.currentObservation.updateTime,
+          temperature: w.currentObservation.temperature ?? null,
+          precipitation: w.currentObservation.precipitation ?? null,
+          humidity_percent: w.currentObservation.humidity,
+          wind: w.currentObservation.wind ?? null,
+        }
+      : null,
   };
 }
 

@@ -743,6 +743,20 @@ describe('buildRestoreCaveats', () => {
     expect(caveat).toContain('[7, 11, 102]');
   });
 
+  it('warns that weather station attachment is not captured when triggers are present', () => {
+    const caveats = buildRestoreCaveats(
+      makeMinimalSnapshot({ watering_triggers: { suspend_water_temperature: { value: 50, unit: 'F' } } }),
+    );
+    const caveat = caveats.find((c) => c.includes('Weather station attachment'));
+    expect(caveat).toBeDefined();
+    expect(caveat).toContain('list_weather_stations');
+  });
+
+  it('omits the weather station caveat when the controller has no watering triggers', () => {
+    const caveats = buildRestoreCaveats(makeMinimalSnapshot({ watering_triggers: null }));
+    expect(caveats.some((c) => c.includes('Weather station attachment'))).toBe(false);
+  });
+
   it('emits a caveat when sensors reference custom types (customer_id non-null and non-zero)', () => {
     const caveats = buildRestoreCaveats(
       makeMinimalSnapshot({

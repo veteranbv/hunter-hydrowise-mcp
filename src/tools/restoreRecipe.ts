@@ -274,6 +274,17 @@ export function buildRestoreCaveats(snapshot: SnapshotForRecipe): string[] {
     );
   }
 
+  // Caveat: weather station attachment drives which observations the watering
+  // triggers evaluate, and the snapshot does not capture it. Emitted only when
+  // the snapshot has triggers, since that is when the station actually matters:
+  // on a controller with no triggers, the attached station changes nothing that
+  // a restore would reproduce.
+  if (c.watering_triggers) {
+    caveats.push(
+      'Weather station attachment is not captured in this snapshot. The watering triggers below will be restored, but they evaluate against whatever weather station the target controller currently has attached, which may not be the station that was feeding them at capture time. Use list_weather_stations on the target before and after restoring, and add_weather_station / remove_weather_station if the source differs.',
+    );
+  }
+
   // Caveat: watering_triggers values include unit strings — if the account's unit
   // preference (F vs C, in vs mm, mph vs kph) has changed between capture and restore,
   // a numeric value applied without converting becomes incorrect.

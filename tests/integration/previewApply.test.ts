@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Config } from '../../src/config.js';
+import { HydrawiseMutationError } from '../../src/errors.js';
 import { HydrawiseApi } from '../../src/hydrawise/api.js';
 import type { HydrawiseClient, Variables } from '../../src/hydrawise/client.js';
 import type { StatusCodeAndSummary } from '../../src/hydrawise/queries.js';
@@ -801,5 +802,88 @@ describe('program run control', () => {
     const payload = JSON.parse(resp.result!.content[0]!.text) as { preview: boolean; operation: string };
     expect(payload.preview).toBe(false);
     expect(payload.operation).toBe('cancelRunsForZone');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Weather stations
+// ---------------------------------------------------------------------------
+
+describe('weather stations', () => {
+  it('list_weather_stations serializes distance and observation as {value, unit}', async () => {
+    const app = makeApp({
+      getWeatherStations: async () => [
+        {
+          id: 4242, key: 'KAAA', source: 7, location: 'Somewhere',
+          distance: { value: 4.2, unit: 'mi' },
+          coordinates: { latitude: 1, longitude: 2 },
+          currentObservation: {
+            time: 't', updateTime: 'u',
+            temperature: { value: 70, unit: 'F' },
+            precipitation: { value: 0, unit: 'in' },
+            humidity: 40,
+            wind: { value: 5, unit: 'mph' },
+          },
+        },
+      ],
+    });
+    const resp = await callTool(app, 'list_weather_stations', { controller_id: 317416 });
+    expect(resp.result?.isError).toBeFalsy();
+    const out = JSON.parse(resp.result!.content[0]!.text) as Array<Record<string, unknown>>;
+    expect(out[0]).toMatchObject({
+      id: 4242, key: 'KAAA', source: 7,
+      distance: { value: 4.2, unit: 'mi' },
+      latitude: 1, longitude: 2,
+    });
+    expect(out[0]!.current_observation).toMatchObject({
+      temperature: { value: 70, unit: 'F' },
+      humidity_percent: 40,
+    });
+  });
+
+  it('add_weather_station preview=true does not dispatch', async () => {
+    let called = false;
+    const app = makeApp({
+      addWeatherStation: async () => {
+        called = true;
+        return true;
+      },
+    });
+    const resp = await callTool(app, 'add_weather_station', {
+      controller_id: 317416, weather_station_id: 4242, preview: true,
+    });
+    expect(called).toBe(false);
+    const payload = JSON.parse(resp.result!.content[0]!.text) as {
+      preview: boolean; operation: string; variables: Record<string, number>;
+    };
+    expect(payload.preview).toBe(true);
+    expect(payload.operation).toBe('addWeatherStation');
+    expect(payload.variables).toEqual({ controllerId: 317416, weatherStationId: 4242 });
+  });
+
+  it('remove_weather_station preview=false dispatches', async () => {
+    let called = false;
+    const app = makeApp({
+      removeWeatherStation: async () => {
+        called = true;
+        return true;
+      },
+    });
+    const resp = await callTool(app, 'remove_weather_station', {
+      controller_id: 317416, weather_station_id: 4242, preview: false,
+    });
+    expect(resp.result?.isError).toBeFalsy();
+    expect(called).toBe(true);
+  });
+
+  it('surfaces a failed station mutation as an error result', async () => {
+    const app = makeApp({
+      addVirtualWeatherStation: async () => {
+        throw new HydrawiseMutationError('addVirtualWeatherStation returned false for controller 1');
+      },
+    });
+    const resp = await callTool(app, 'add_virtual_weather_station', { controller_id: 1 });
+    expect(resp.result?.isError).toBe(true);
+    expect(resp.result?.content[0]?.text).toMatch(/^mutation_error:/);
   });
 });
