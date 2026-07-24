@@ -365,7 +365,17 @@ export class HydrawiseApi {
         `Hydrawise returned null for controller ${controllerId} alerts, which the schema declares non-null ([Event!]!)`,
       );
     }
-    return data.controller.alerts.filter((e): e is EventRead => e != null);
+    // [Event!]! makes the ELEMENTS non-null too. Filtering nulls away here would
+    // under-report: the caller would be told there are no outstanding alert
+    // events when the read actually failed partially, and "no alerts" is the
+    // signal a user acts on. Elsewhere (e.g. Controller.events, typed [Event])
+    // null elements are legal and are filtered instead.
+    if (data.controller.alerts.some((e) => e == null)) {
+      throw new HydrawiseAPIError(
+        `Hydrawise returned a null entry in controller ${controllerId} alerts, which the schema declares non-null ([Event!]!)`,
+      );
+    }
+    return data.controller.alerts as EventRead[];
   }
 
   // Both acknowledge mutations return bare Boolean, so mutateRaw carries the

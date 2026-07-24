@@ -743,6 +743,23 @@ describe('HydrawiseApi — controller events', () => {
     await expect(api.getControllerAlertEvents(1, '')).rejects.toThrow(HydrawiseAPIError);
   });
 
+  it('getControllerAlertEvents throws api_error on a null ENTRY (elements are non-null too)', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { alerts: [{ ...event, isAlert: true }, null] } });
+    const api = new HydrawiseApi(h.client);
+    // Dropping the null would report one alert event when the read returned two
+    // entries, one of them broken. "No alerts" / "fewer alerts" is the signal a
+    // user acts on, so a partial read must fail loudly.
+    await expect(api.getControllerAlertEvents(1, '')).rejects.toThrow(HydrawiseAPIError);
+  });
+
+  it('getControllerEvents still drops null entries (Controller.events is [Event], elements nullable)', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { events: [event, null] } });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.getControllerEvents(1, 10, 0)).toEqual([event]);
+  });
+
   it('getControllerEvents still treats a null events array as empty (schema allows null)', async () => {
     const h = fakeEventsClient();
     h.setQueryResult({ controller: { events: null } });
