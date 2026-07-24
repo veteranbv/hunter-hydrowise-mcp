@@ -132,6 +132,7 @@ describe('streamable HTTP transport', () => {
         'list_program_start_times_for_zone',
         'get_seasonal_adjustments',
         'get_watering_triggers',
+        'list_watering_adjustments',
         'update_zone_settings',
         'update_zone_standard',
         'set_zone_baseline',

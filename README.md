@@ -177,6 +177,7 @@ All write tools are prefixed `PHYSICAL ACTION:` and accept `preview: true` to dr
 | `get_watering_triggers` / `update_watering_triggers` | Rain/temperature/humidity/wind triggers |
 | `list_programs` / `get_program` | List or fetch a program (Standard or Advanced detail) |
 | `list_program_start_times_for_zone` | Start times associated with a single zone |
+| `list_watering_adjustments` | Account-wide catalog of conditional adjustments (suspend/boost rules) behind `schedule_adjustment_ids`, with labels; optional `program_id` also returns the program's attached set |
 | `create_program_start_time` / `update_program_start_time` / `delete_program_start_time` | Program start time CRUD |
 | `create_standard_program` / `update_standard_program` / `delete_standard_program` | Standard program CRUD |
 | `create_watering_program` / `update_watering_program` / `delete_watering_program` | Time / Smart / VirtualSolarSync watering program CRUD |
@@ -230,7 +231,7 @@ All notes are typed (`fault | location | repair | comment`) with optional `pinne
 
 | Tool | Purpose |
 | --- | --- |
-| `dump_controller_snapshot` | Versioned JSON snapshot (`snapshot_version: 8`). See "Backup and restore" below. |
+| `dump_controller_snapshot` | Versioned JSON snapshot (`snapshot_version: 9`). See "Backup and restore" below. |
 
 ## Backup and restore
 

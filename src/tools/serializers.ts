@@ -548,6 +548,15 @@ export function serializeStandardProgram(p: import('../hydrawise/queries.js').St
     // violates `!` (see CLAUDE.md gotcha re Zone.status.lastRun). A null upstream array
     // would crash the whole snapshot via `Promise.all` rejection in dump_controller_snapshot.
     schedule_adjustment_ids: (p.conditionalWateringAdjustments ?? []).map((a) => a.id),
+    // Same data with the labels kept (issue #11: the bare ids are opaque — labels are the
+    // only human-readable handle on what each account-managed adjustment does, and the only
+    // way a restore can detect that an id was redefined between capture and restore).
+    // schedule_adjustment_ids stays as-is because the restore recipe and the update mutations
+    // consume bare ids.
+    schedule_adjustments: (p.conditionalWateringAdjustments ?? []).map((a) => ({
+      id: a.id,
+      label: a.label,
+    })),
     applies_to_zones: (p.appliesToZones ?? []).map((z) => ({
       id: z.id,
       number: z.number.value,
@@ -561,6 +570,22 @@ export function serializeStandardProgram(p: import('../hydrawise/queries.js').St
       run_time_group_name: a.runTimeGroup.name,
       duration_minutes: a.runTimeGroup.duration,
     })),
+  };
+}
+
+// Full shape for the list_watering_adjustments tool — includes the
+// applicable_scheduling_method detail that the inline program serializers omit
+// (their schedule_adjustments field carries only {id, label}).
+export function serializeWateringAdjustment(
+  a: import('../hydrawise/queries.js').WateringProgramAdjustmentRead,
+): Record<string, unknown> {
+  return {
+    id: a.id,
+    label: a.label,
+    applicable_scheduling_method: {
+      value: a.applicableSchedulingMethod?.value ?? null,
+      label: a.applicableSchedulingMethod?.label ?? null,
+    },
   };
 }
 
@@ -590,6 +615,11 @@ export function serializeAdvancedProgram(p: AdvancedProgramRead): Record<string,
     scheduling_method: p.schedulingMethod?.value ?? null,
     // Defensive `?? []` matches serializeStandardProgram — same `!`-violation gotcha.
     schedule_adjustment_ids: (p.conditionalWateringAdjustments ?? []).map((a) => a.id),
+    // Labels kept alongside the bare ids — same rationale as serializeStandardProgram.
+    schedule_adjustments: (p.conditionalWateringAdjustments ?? []).map((a) => ({
+      id: a.id,
+      label: a.label,
+    })),
     // Flatten the ProgramWateringFrequency wrapper. The schema declares both the wrapper
     // (`wateringFrequency: ProgramWateringFrequency!`) and `period: WateringPeriodicity!`
     // as non-null, but Hydrawise demonstrably violates `!` declarations elsewhere (see

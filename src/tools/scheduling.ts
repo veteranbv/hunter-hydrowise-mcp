@@ -14,6 +14,7 @@ import {
   serializeAdvancedProgram,
   serializeProgramStartTime,
   serializeStandardProgram,
+  serializeWateringAdjustment,
   serializeWateringTriggers,
   serializeZoneSettings,
 } from './serializers.js';
@@ -398,6 +399,41 @@ export function registerSchedulingTools(
           throw new ConfigError(`watering triggers not configured on controller ${controller_id}`);
         }
         return jsonResult(serializeWateringTriggers(triggers));
+      }),
+  );
+
+  server.registerTool(
+    'list_watering_adjustments',
+    {
+      description:
+        "List the account-managed conditional watering adjustments (suspend/boost rules like \"Wind above 25mph\", \"0.3in+ rainfall last day\") behind the opaque integer schedule_adjustment_ids. Always returns `catalog`: the controller's full catalog of AVAILABLE adjustments. With optional `program_id` (Standard or Advanced), additionally returns `attached`: the adjustments currently attached to that program. Use it to interpret schedule_adjustment_ids, to verify ids before writing them, and to compare capture-time vs restore-time meanings when applying a snapshot — ids are account-scoped and can be redefined, and the same label can appear under different ids for different scheduling methods, so compare id + label + applicable_scheduling_method together. Read-only.",
+      inputSchema: {
+        controller_id: z.number().int(),
+        program_id: z.number().int().optional(),
+      },
+    },
+    async ({ controller_id, program_id }) =>
+      wrap('list_watering_adjustments', async () => {
+        const catalog = await api.getWateringAdjustmentCatalog(controller_id);
+        if (program_id === undefined) {
+          return jsonResult({
+            controller_id,
+            catalog: catalog.map(serializeWateringAdjustment),
+            attached: null,
+          });
+        }
+        const attached = await api.getConditionalWateringAdjustments(controller_id, program_id);
+        if (!attached) {
+          throw new ConfigError(
+            `program ${program_id} not found on controller ${controller_id}`,
+          );
+        }
+        return jsonResult({
+          controller_id,
+          program_id,
+          catalog: catalog.map(serializeWateringAdjustment),
+          attached: attached.map(serializeWateringAdjustment),
+        });
       }),
   );
 

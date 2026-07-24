@@ -674,3 +674,104 @@ describe('HydrawiseApi — Advanced program reads', () => {
     await expect(api.getAdvancedProgram(317416, 6390999)).rejects.toThrow(HydrawiseNotFoundError);
   });
 });
+
+describe('HydrawiseApi — conditional watering adjustments', () => {
+  function fakeQueryClient() {
+    const calls: Array<{ document: string; variables?: Variables }> = [];
+    let nextResult: unknown = null;
+    const client: HydrawiseClient = {
+      async query<TResult>(document: string, variables?: Variables): Promise<TResult> {
+        calls.push({ document, variables });
+        return nextResult as TResult;
+      },
+      async mutate() {
+        throw new Error('no mutations expected');
+      },
+      async mutateRaw() {
+        throw new Error('no mutations expected');
+      },
+    };
+    return { client, calls, setNextResult: (r: unknown) => { nextResult = r; } };
+  }
+
+  const adjustments = [
+    { id: 7, label: 'Water more often when hot', applicableSchedulingMethod: { value: 3, label: 'Virtual Solar Sync' } },
+    { id: 11, label: '0.3in+ rainfall last day', applicableSchedulingMethod: { value: null, label: null } },
+  ];
+  const standardEntry = { __typename: 'StandardProgram', id: 8675639, conditionalWateringAdjustments: adjustments };
+
+  it('dispatches CONDITIONAL_WATERING_ADJUSTMENTS_QUERY with controllerId and isContractor:false baked in', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    await api.getConditionalWateringAdjustments(317416, 8675639);
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(harness.calls[0]?.document).toContain('conditionalWateringAdjustments');
+    expect(harness.calls[0]?.document).toContain('isContractor: false');
+    expect(harness.calls[0]?.document).toContain('applicableSchedulingMethod');
+  });
+
+  it('returns the adjustments when the id resolves to a StandardProgram', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    const out = await api.getConditionalWateringAdjustments(317416, 8675639);
+    expect(out).toEqual(adjustments);
+  });
+
+  it('returns [] when the StandardProgram has a null adjustments array (schema `!` violation)', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      controller: { programs: [{ ...standardEntry, conditionalWateringAdjustments: null }] },
+    });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 8675639)).toEqual([]);
+  });
+
+  it('returns the adjustments when the id resolves to an AdvancedProgram (field is on the Program interface)', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      controller: {
+        programs: [{ __typename: 'AdvancedProgram', id: 8675639, conditionalWateringAdjustments: adjustments }],
+      },
+    });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 8675639)).toEqual(adjustments);
+  });
+
+  it('getWateringAdjustmentCatalog dispatches the configuration catalog query and filters null entries', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({
+      configuration: { controllerWateringProgramAdjustments: [adjustments[0], null, adjustments[1]] },
+    });
+    const api = new HydrawiseApi(harness.client);
+    const out = await api.getWateringAdjustmentCatalog(317416);
+    expect(harness.calls[0]?.document).toContain('controllerWateringProgramAdjustments');
+    expect(harness.calls[0]?.variables).toEqual({ controllerId: 317416 });
+    expect(out).toEqual(adjustments);
+  });
+
+  it('getWateringAdjustmentCatalog returns [] when configuration is null', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ configuration: null });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getWateringAdjustmentCatalog(317416)).toEqual([]);
+  });
+
+  it('returns null when no matching id exists', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: { programs: [standardEntry] } });
+    const api = new HydrawiseApi(harness.client);
+    expect(await api.getConditionalWateringAdjustments(317416, 9999999)).toBeNull();
+  });
+
+  it('throws HydrawiseNotFoundError when controller is null', async () => {
+    const harness = fakeQueryClient();
+    harness.setNextResult({ controller: null });
+    const api = new HydrawiseApi(harness.client);
+    await expect(api.getConditionalWateringAdjustments(317416, 8675639)).rejects.toThrow(
+      HydrawiseNotFoundError,
+    );
+  });
+});

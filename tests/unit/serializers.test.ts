@@ -26,6 +26,7 @@ import {
   serializeSensorModel,
   serializeSensorZoneRefsForZone,
   serializeStandardProgram,
+  serializeWateringAdjustment,
   serializeTimeZone,
   serializeWateringTriggers,
   serializeZoneSettings,
@@ -306,6 +307,8 @@ describe('serializeStandardProgram', () => {
     expect(out.valid_from_epoch_seconds).toBeNull();
     expect(out.valid_to_epoch_seconds).toBeNull();
     expect(out.schedule_adjustment_ids).toEqual([17]);
+    // v9: labels kept alongside the bare ids (issue #11 — ids alone are opaque).
+    expect(out.schedule_adjustments).toEqual([{ id: 17, label: 'Vacation' }]);
     expect(out.per_zone_run_times).toEqual([
       { zone_id: 100, zone_number: 1, run_time_group_id: 200, run_time_group_name: null, duration_minutes: 10 },
     ]);
@@ -487,6 +490,30 @@ describe('serializeSensorZoneRefsForZone', () => {
   });
 });
 
+describe('serializeWateringAdjustment', () => {
+  it('emits id, label, and unwrapped applicable_scheduling_method', () => {
+    const out = serializeWateringAdjustment({
+      id: 7,
+      label: 'Water more often when hot',
+      applicableSchedulingMethod: { value: 3, label: 'Virtual Solar Sync' },
+    });
+    expect(out).toEqual({
+      id: 7,
+      label: 'Water more often when hot',
+      applicable_scheduling_method: { value: 3, label: 'Virtual Solar Sync' },
+    });
+  });
+
+  it('passes through null scheduling-method members (genuinely nullable per schema)', () => {
+    const out = serializeWateringAdjustment({
+      id: 11,
+      label: '0.3in+ rainfall last day',
+      applicableSchedulingMethod: { value: null, label: null },
+    });
+    expect(out.applicable_scheduling_method).toEqual({ value: null, label: null });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // AdvancedProgram serializers (irrigation-scheduling, ADVANCED-mode)
 // ---------------------------------------------------------------------------
@@ -526,6 +553,8 @@ describe('serializeAdvancedProgram', () => {
       monthly_watering_adjustment_percents: [100, 100, 100, 110, 120, 130, 140, 130, 120, 110, 100, 100],
       scheduling_method: 3,
       schedule_adjustment_ids: [17],
+      // v9: labels kept alongside the bare ids — same as serializeStandardProgram.
+      schedule_adjustments: [{ id: 17, label: 'Hot Days' }],
     });
     expect(out.watering_frequency).toEqual({
       label: 'Daily',

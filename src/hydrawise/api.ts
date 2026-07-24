@@ -26,6 +26,8 @@ import {
   DELETE_ZONE_NOTE_MUTATION,
   HIBERNATE_CONTROLLER_MUTATION,
   ME_QUERY,
+  CONDITIONAL_WATERING_ADJUSTMENTS_QUERY,
+  CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY,
   PROGRAM_START_TIMES_QUERY,
   PROGRAMS_FULL_QUERY,
   PROGRAMS_QUERY,
@@ -99,6 +101,7 @@ import {
   type SensorUpdatePayload,
   type SetBaselineValuesPayload,
   type StandardProgramRead,
+  type WateringProgramAdjustmentRead,
   type StandardProgramWritable,
   type StatusCodeAndSummary,
   type User,
@@ -405,6 +408,54 @@ export class HydrawiseApi {
       (p) => p.id === programId && p.__typename === 'AdvancedProgram',
     );
     return found ?? null;
+  }
+
+  // Returns the conditional watering adjustments ATTACHED to a program (Standard or
+  // Advanced — the field is on the Program interface), with labels and the
+  // applicableSchedulingMethod detail that PROGRAMS_FULL_QUERY omits. For the
+  // account-wide catalog of AVAILABLE adjustments, see getWateringAdjustmentCatalog.
+  // Null when programId doesn't exist on this controller. Controller-not-found
+  // still throws HydrawiseNotFoundError.
+  async getConditionalWateringAdjustments(
+    controllerId: number,
+    programId: number,
+  ): Promise<WateringProgramAdjustmentRead[] | null> {
+    const data = await this.client.query<{
+      controller: {
+        programs:
+          | {
+              __typename: string;
+              id: number;
+              conditionalWateringAdjustments?: WateringProgramAdjustmentRead[] | null;
+            }[]
+          | null;
+      } | null;
+    }>(CONDITIONAL_WATERING_ADJUSTMENTS_QUERY, { controllerId });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    const found = (data.controller.programs ?? []).find((p) => p.id === programId);
+    if (!found) return null;
+    // Defensive `?? []` on a schema-declared non-null array — same `!`-violation
+    // gotcha handled throughout the serializers.
+    return found.conditionalWateringAdjustments ?? [];
+  }
+
+  // The account-wide catalog of watering-program adjustments available on a
+  // controller (Configuration.controllerWateringProgramAdjustments). Verified live
+  // 2026-07-24: a strict superset of any program's attached set. Defensive at every
+  // level — configuration and the list are nullable in the schema.
+  async getWateringAdjustmentCatalog(
+    controllerId: number,
+  ): Promise<WateringProgramAdjustmentRead[]> {
+    const data = await this.client.query<{
+      configuration: {
+        controllerWateringProgramAdjustments?: (WateringProgramAdjustmentRead | null)[] | null;
+      } | null;
+    }>(CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY, { controllerId });
+    return (data.configuration?.controllerWateringProgramAdjustments ?? []).filter(
+      (a): a is WateringProgramAdjustmentRead => a != null,
+    );
   }
 
   async getPrograms(controllerId: number, includeZoneSpecific = true): Promise<ProgramListEntry[]> {
