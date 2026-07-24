@@ -131,7 +131,7 @@ const fakeStandardProgram: StandardProgramRead = {
   ignoreRainSensor: false,
   daysRun: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'],
   standardProgramDayPattern: 'interval',
-  periodicity: { period: 2, seriesStart: { value: 'Thu, 26 Jun 25 00:00:00 -0600' } },
+  periodicity: { period: 2, seriesStart: { timestamp: 1750917600 } },
   timeRange: { validFrom: null, validTo: null },
   conditionalWateringAdjustments: [],
   applications: [
