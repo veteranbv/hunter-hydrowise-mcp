@@ -147,6 +147,13 @@ const fakeZoneWithCycleSoak = {
   },
 };
 
+const fakeControllerStatus = {
+  online: true,
+  summary: 'All good!',
+  icon: 'ok.png',
+  accumulatedWaterSavings: 100,
+};
+
 const fakeControllerStandard = {
   id: 317416,
   deviceId: 5,
@@ -158,6 +165,7 @@ const fakeControllerStandard = {
   lastContactTime: null,
   location: null,
   settings: null,
+  status: fakeControllerStatus,
   masterZone: null,
   expanders: null,
   runTimeGroups: [],

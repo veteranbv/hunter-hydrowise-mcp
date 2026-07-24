@@ -132,7 +132,7 @@ const fakeStandardProgram: StandardProgramRead = {
   daysRun: ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'],
   standardProgramDayPattern: 'interval',
   // StandardProgramRead.periodicity.seriesStart is { timestamp: number } (epoch seconds).
-  periodicity: { period: 2, seriesStart: { timestamp: 1750914000 } },
+  periodicity: { period: 2, seriesStart: { timestamp: 1750917600 } },
   timeRange: { validFrom: null, validTo: null },
   conditionalWateringAdjustments: [],
   applications: [
