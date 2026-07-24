@@ -33,6 +33,9 @@ coverage/
 !.env.example
 snapshots
 
+# Private, machine-local operator state (companion to CLAUDE.md)
+CLAUDE.local.md
+
 # Editors / OS
 .vscode/
 .idea/

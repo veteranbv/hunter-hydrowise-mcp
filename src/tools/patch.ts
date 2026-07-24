@@ -273,13 +273,11 @@ export function registerPatchTools(
         cycle_custom_time_minutes: z
           .number()
           .int()
-          .nullable()
           .optional()
           .describe('Cycle duration in minutes. Preserved from current settings when omitted.'),
         soak_custom_time_minutes: z
           .number()
           .int()
-          .nullable()
           .optional()
           .describe('Soak duration in minutes. Preserved from current settings when omitted.'),
         preview: z.boolean().optional(),

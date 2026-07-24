@@ -515,6 +515,28 @@ describe('update_zone_cycle_soak', () => {
     expect(payload.planned_call.variables.icon).toBe(10);
   });
 
+  it('rejects null cycle_custom_time_minutes (omit-to-preserve; null never dispatched)', async () => {
+    let called = false;
+    const app = makeApp({
+      getZoneFull: async () => fakeZone,
+      getController: async () => fakeControllerStandard,
+      updateZoneStandard: async () => {
+        called = true;
+        return { id: fakeZone.id };
+      },
+    });
+    const resp = await callTool(app, 'update_zone_cycle_soak', {
+      controller_id: 317416,
+      zone_id: 100,
+      cycle_soak_enable: true,
+      cycle_custom_time_minutes: null,
+    });
+    // Zod rejects null before the handler runs, so the mutation is never dispatched.
+    expect(called).toBe(false);
+    expect(resp.result?.isError).toBe(true);
+    expect(resp.result!.content[0]!.text).toContain('Expected number, received null');
+  });
+
   it('routes icon_file_id (not icon) for zones with custom uploaded images', async () => {
     let capturedPayload: unknown;
     const app = makeApp({
