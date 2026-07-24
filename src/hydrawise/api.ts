@@ -5,6 +5,10 @@ import {
   CONTROLLER_QUERY,
   CONTROLLER_SENSORS_QUERY,
   CONTROLLERS_QUERY,
+  ACKNOWLEDGE_ALL_EVENTS_MUTATION,
+  ACKNOWLEDGE_EVENT_MUTATION,
+  CONTROLLER_ALERT_EVENTS_QUERY,
+  CONTROLLER_EVENTS_QUERY,
   CREATE_CONTROLLER_NOTE_MUTATION,
   CREATE_CUSTOM_SENSOR_TYPE_MUTATION,
   CREATE_EXPANDER_MUTATION,
@@ -79,6 +83,7 @@ import {
   type AdvancedProgramRead,
   type Controller,
   type ControllerNoteRead,
+  type EventRead,
   type CustomSensorTypeCreatePayload,
   type CustomSensorTypeUpdatePayload,
   type LocationRead,
@@ -328,6 +333,64 @@ export class HydrawiseApi {
   // object on free accounts. These dedicated methods let callers handle the error
   // independently (e.g. backup.ts falls back to [] and emits a warn on subscription
   // errors, propagating all other errors).
+
+  // Controller event log. `length` and `page` mirror the schema arguments; the
+  // caller decides how far back to walk rather than the API defaulting to 1000.
+  async getControllerEvents(controllerId: number, length: number, page: number): Promise<EventRead[]> {
+    const data = await this.client.query<{
+      controller: { events: (EventRead | null)[] | null } | null;
+    }>(CONTROLLER_EVENTS_QUERY, { controllerId, length, page });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    return (data.controller.events ?? []).filter((e): e is EventRead => e != null);
+  }
+
+  // The alert-flagged slice of the same log. Named `alerts` upstream but typed
+  // [Event!]!, so this returns EventRead, not alert configuration.
+  async getControllerAlertEvents(controllerId: number, after: string): Promise<EventRead[]> {
+    const data = await this.client.query<{
+      controller: { alerts: (EventRead | null)[] | null } | null;
+    }>(CONTROLLER_ALERT_EVENTS_QUERY, { controllerId, after });
+    if (!data.controller) {
+      throw new HydrawiseNotFoundError(`controller ${controllerId} not found`);
+    }
+    return (data.controller.alerts ?? []).filter((e): e is EventRead => e != null);
+  }
+
+  // Both acknowledge mutations return bare Boolean, so mutateRaw carries the
+  // false-and-null-to-error mapping (same pattern as the weather stations).
+  async acknowledgeEvent(eventId: string, controllerId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ACKNOWLEDGE_EVENT_MUTATION,
+      { eventId, controllerId },
+      (data) => {
+        const ok = (data as { acknowledgeEvent: boolean | null }).acknowledgeEvent;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `acknowledgeEvent returned ${ok === null ? 'null' : 'false'} for event ${eventId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async acknowledgeAllEvents(controllerId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ACKNOWLEDGE_ALL_EVENTS_MUTATION,
+      { controllerId },
+      (data) => {
+        const ok = (data as { acknowledgeAllEvents: boolean | null }).acknowledgeAllEvents;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `acknowledgeAllEvents returned ${ok === null ? 'null' : 'false'} for controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
 
   async getControllerNotes(controllerId: number): Promise<ControllerNoteRead[]> {
     const data = await this.client.query<{

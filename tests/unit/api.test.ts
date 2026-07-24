@@ -674,3 +674,85 @@ describe('HydrawiseApi — Advanced program reads', () => {
     await expect(api.getAdvancedProgram(317416, 6390999)).rejects.toThrow(HydrawiseNotFoundError);
   });
 });
+
+describe('HydrawiseApi — controller events', () => {
+  function fakeEventsClient() {
+    const calls: Array<{ document: string; variables?: Variables }> = [];
+    let queryResult: unknown = null;
+    let rawResult: Record<string, unknown> = {};
+    const client: HydrawiseClient = {
+      async query<TResult>(document: string, variables?: Variables): Promise<TResult> {
+        calls.push({ document, variables });
+        return queryResult as TResult;
+      },
+      async mutate(): Promise<StatusCodeAndSummary> {
+        throw new Error('event mutations use mutateRaw');
+      },
+      async mutateRaw<TResult>(
+        document: string,
+        variables: Variables,
+        extract: (data: Record<string, unknown>) => TResult,
+      ): Promise<TResult> {
+        calls.push({ document, variables });
+        return extract(rawResult);
+      },
+    };
+    return {
+      client, calls,
+      setQueryResult: (r: unknown) => { queryResult = r; },
+      setRawResult: (r: Record<string, unknown>) => { rawResult = r; },
+    };
+  }
+
+  const event = {
+    id: 'evt-1', eventTime: '2026-07-24T00:00:00Z', severity: 'Info',
+    message: 'Controller connected', isAlert: false, actions: ['view', null],
+  };
+
+  it('getControllerEvents forwards length and page', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { events: [event, null] } });
+    const api = new HydrawiseApi(h.client);
+    const out = await api.getControllerEvents(317416, 25, 2);
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416, length: 25, page: 2 });
+    expect(out).toEqual([event]);
+  });
+
+  it('getControllerEvents throws HydrawiseNotFoundError when the controller is null', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.getControllerEvents(1, 10, 0)).rejects.toThrow(HydrawiseNotFoundError);
+  });
+
+  it('getControllerAlertEvents reads the alert-flagged slice with the after cursor', async () => {
+    const h = fakeEventsClient();
+    h.setQueryResult({ controller: { alerts: [{ ...event, isAlert: true }] } });
+    const api = new HydrawiseApi(h.client);
+    const out = await api.getControllerAlertEvents(317416, 'cursor-1');
+    expect(h.calls[0]?.variables).toEqual({ controllerId: 317416, after: 'cursor-1' });
+    expect(out[0]?.isAlert).toBe(true);
+  });
+
+  it('acknowledgeEvent passes the string event id', async () => {
+    const h = fakeEventsClient();
+    h.setRawResult({ acknowledgeEvent: true });
+    const api = new HydrawiseApi(h.client);
+    expect(await api.acknowledgeEvent('evt-1', 317416)).toBe(true);
+    expect(h.calls[0]?.variables).toEqual({ eventId: 'evt-1', controllerId: 317416 });
+  });
+
+  it('acknowledgeEvent raises HydrawiseMutationError on false', async () => {
+    const h = fakeEventsClient();
+    h.setRawResult({ acknowledgeEvent: false });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.acknowledgeEvent('evt-1', 1)).rejects.toThrow(HydrawiseMutationError);
+  });
+
+  it('acknowledgeAllEvents raises HydrawiseMutationError on null', async () => {
+    const h = fakeEventsClient();
+    h.setRawResult({ acknowledgeAllEvents: null });
+    const api = new HydrawiseApi(h.client);
+    await expect(api.acknowledgeAllEvents(1)).rejects.toThrow(HydrawiseMutationError);
+  });
+});
