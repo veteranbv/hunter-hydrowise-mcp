@@ -680,3 +680,124 @@ describe('preview/apply contract', () => {
     expect(resp.result?.isError).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Program-level run control
+// ---------------------------------------------------------------------------
+
+describe('program run control', () => {
+  it('run_program preview=true reports the mutation payload and does NOT dispatch', async () => {
+    let called = false;
+    const app = makeApp({
+      startZonesWithProgram: async () => {
+        called = true;
+        return { status: 'OK', summary: 'running' };
+      },
+    });
+    const resp = await callTool(app, 'run_program', {
+      program_id: 6390589,
+      mark_run_as_scheduled: false,
+      minutes: 1,
+      preview: true,
+    });
+    expect(resp.result?.isError).toBeFalsy();
+    expect(called).toBe(false);
+    const payload = JSON.parse(resp.result!.content[0]!.text) as {
+      preview: boolean;
+      operation: string;
+      variables: { programId: number; markRunAsScheduled: boolean; customDuration: number };
+    };
+    expect(payload.preview).toBe(true);
+    expect(payload.operation).toBe('startZonesWithProgram');
+    expect(payload.variables.programId).toBe(6390589);
+    expect(payload.variables.markRunAsScheduled).toBe(false);
+    // minutes -> seconds: verified on hardware that customDuration is seconds.
+    expect(payload.variables.customDuration).toBe(60);
+  });
+
+  it('run_program omits the duration override when minutes is not given', async () => {
+    const app = makeApp({
+      startZonesWithProgram: async () => ({ status: 'OK', summary: 'running' }),
+    });
+    const resp = await callTool(app, 'run_program', {
+      program_id: 1,
+      mark_run_as_scheduled: true,
+      preview: true,
+    });
+    const payload = JSON.parse(resp.result!.content[0]!.text) as {
+      variables: { customDuration: number | null; markRunAsScheduled: boolean };
+    };
+    expect(payload.variables.customDuration).toBeNull();
+    expect(payload.variables.markRunAsScheduled).toBe(true);
+  });
+
+  it('run_program_start_time targets the start time id', async () => {
+    const app = makeApp({
+      startZonesWithProgramStartTime: async () => ({ status: 'OK', summary: 'running' }),
+    });
+    const resp = await callTool(app, 'run_program_start_time', {
+      program_start_time_id: 555,
+      mark_run_as_scheduled: false,
+      minutes: 2,
+      preview: true,
+    });
+    const payload = JSON.parse(resp.result!.content[0]!.text) as {
+      operation: string;
+      variables: { programStartTimeId: number; customDuration: number };
+    };
+    expect(payload.operation).toBe('startZonesWithProgramStartTime');
+    expect(payload.variables.programStartTimeId).toBe(555);
+    expect(payload.variables.customDuration).toBe(120);
+  });
+
+  it('run_selected_zones converts each duration to seconds positionally', async () => {
+    const app = makeApp({
+      startSelectedZones: async () => ({ status: 'OK', summary: 'running' }),
+    });
+    const resp = await callTool(app, 'run_selected_zones', {
+      zone_ids: [100, 101],
+      minutes: [1, 5],
+      preview: true,
+    });
+    const payload = JSON.parse(resp.result!.content[0]!.text) as {
+      variables: { zoneIds: number[]; runDurations: number[]; stackRuns: boolean };
+    };
+    expect(payload.variables.zoneIds).toEqual([100, 101]);
+    expect(payload.variables.runDurations).toEqual([60, 300]);
+    expect(payload.variables.stackRuns).toBe(true);
+  });
+
+  it('run_selected_zones rejects a zone_ids/minutes length mismatch before dispatching', async () => {
+    let called = false;
+    const app = makeApp({
+      startSelectedZones: async () => {
+        called = true;
+        return { status: 'OK', summary: 'running' };
+      },
+    });
+    const resp = await callTool(app, 'run_selected_zones', {
+      zone_ids: [100, 101, 102],
+      minutes: [1, 5],
+    });
+    expect(resp.result?.isError).toBe(true);
+    expect(resp.result?.content[0]?.text).toMatch(/^config_error:/);
+    expect(resp.result?.content[0]?.text).toContain('same length');
+    expect(called).toBe(false);
+  });
+
+  it('cancel_zone_runs preview=false invokes the API', async () => {
+    let called = false;
+    const app = makeApp({
+      cancelRunsForZone: async () => {
+        called = true;
+        return { status: 'OK', summary: 'stopping' };
+      },
+    });
+    const resp = await callTool(app, 'cancel_zone_runs', { zone_id: 100, preview: false });
+    expect(resp.result?.isError).toBeFalsy();
+    expect(called).toBe(true);
+    const payload = JSON.parse(resp.result!.content[0]!.text) as { preview: boolean; operation: string };
+    expect(payload.preview).toBe(false);
+    expect(payload.operation).toBe('cancelRunsForZone');
+  });
+});

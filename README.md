@@ -160,6 +160,10 @@ All write tools are prefixed `PHYSICAL ACTION:` and accept `preview: true` to dr
 | `stop_zone` | Stop one zone |
 | `start_all_zones` | Run every zone on a controller |
 | `stop_all_zones` | Stop every zone on a controller |
+| `run_program` | Run every zone attached to a program, as one program run. Zones run sequentially |
+| `run_program_start_time` | Run the zones attached to a single program start time |
+| `run_selected_zones` | Run a chosen set of zones, each with its own run length |
+| `cancel_zone_runs` | Cancel the in-progress run and any queued runs for a zone |
 | `suspend_zone` | Suspend a zone's schedule (`days` or `until`) |
 | `resume_zone` | Clear a suspension |
 | `suspend_all_zones` | Suspend every zone |

@@ -93,6 +93,7 @@ openspec/              spec-driven workflow artifacts (proposals, designs, tasks
 
 ### Control — `src/tools/control.ts` (PHYSICAL ACTION)
 - `start_zone`, `stop_zone`, `start_all_zones`, `stop_all_zones`
+- `run_program`, `run_program_start_time`, `run_selected_zones`, `cancel_zone_runs` — program-level run control. `mark_run_as_scheduled` is required on the two program tools (the mutation declares it non-null). Duration overrides are sent as seconds, verified on a live controller 2026-07-24: `customDuration: 60` produced a 1-minute run, and a program run queues its zones sequentially rather than concurrently. `cancel_zone_runs` clears queued runs too, unlike `stop_zone`.
 - `suspend_zone`, `resume_zone`, `suspend_all_zones`, `resume_all_zones`
 
 ### Scheduling — `src/tools/scheduling.ts` (reads + PHYSICAL ACTION writes)

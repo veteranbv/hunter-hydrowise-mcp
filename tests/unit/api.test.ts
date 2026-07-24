@@ -69,6 +69,65 @@ describe('HydrawiseApi', () => {
     });
   });
 
+  // Program-level run control. customDuration / runDurations are SECONDS,
+  // verified on a live controller 2026-07-24 (60 produced a 1-minute run).
+  it('startZonesWithProgram passes customDuration in seconds and requires markRunAsScheduled', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgram(6390589, true, { customDurationSeconds: 60 });
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      programId: 6390589,
+      markRunAsScheduled: true,
+      customDuration: 60,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('startZonesWithProgram sends customDuration: null when no override is given', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgram(6390589, false);
+    expect(harness.mutateCalls[0]?.variables).toMatchObject({
+      markRunAsScheduled: false,
+      customDuration: null,
+    });
+  });
+
+  it('startZonesWithProgramStartTime targets the start time id', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startZonesWithProgramStartTime(555, true, { customDurationSeconds: 120 });
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      programStartTimeId: 555,
+      markRunAsScheduled: true,
+      customDuration: 120,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('startSelectedZones sends parallel zoneIds/runDurations arrays and defaults stackRuns true', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.startSelectedZones([100, 101], [60, 300]);
+    expect(harness.mutateCalls[0]?.variables).toEqual({
+      zoneIds: [100, 101],
+      runDurations: [60, 300],
+      markRunAsScheduled: false,
+      stackRuns: true,
+      learnCurrentFromNextRun: null,
+      learnFlowFromNextRun: null,
+    });
+  });
+
+  it('cancelRunsForZone targets a single zone', async () => {
+    const harness = fakeClient();
+    const api = new HydrawiseApi(harness.client);
+    await api.cancelRunsForZone(100);
+    expect(harness.mutateCalls[0]?.variables).toEqual({ zoneId: 100 });
+  });
+
   it('startZone forwards learn_flow_from_next_run when set', async () => {
     const harness = fakeClient();
     const api = new HydrawiseApi(harness.client);

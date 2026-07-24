@@ -332,6 +332,104 @@ export const START_ALL_ZONES_MUTATION = /* GraphQL */ `
   }
 `;
 
+/** GraphQL: run every zone attached to a program, as one program run.
+ *
+ * `markRunAsScheduled` is non-null in the schema, so callers must state it: true
+ * records the run as a scheduled run (counts against the program's schedule),
+ * false runs it as a manual/extra run.
+ *
+ * `customDuration` is SECONDS. Verified on a live controller 2026-07-24:
+ * dispatching this mutation with customDuration=60 produced runs reported by
+ * `getZoneRunsBetween` as duration=1 (minutes) with remainingTime counting down
+ * from ~60 (seconds). Same unit as `startZone.customRunDuration`.
+ *
+ * Also verified in that run: the mutation queues every zone attached to the
+ * program sequentially (staggered start times), not concurrently, and each zone
+ * receives the customDuration override.
+ */
+export const START_ZONES_WITH_PROGRAM_MUTATION = /* GraphQL */ `
+  mutation StartZonesWithProgram(
+    $programId: Int!
+    $markRunAsScheduled: Boolean!
+    $customDuration: Int
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startZonesWithProgram(
+      programId: $programId
+      markRunAsScheduled: $markRunAsScheduled
+      customDuration: $customDuration
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: run the zones attached to a single program start time. Same
+ * markRunAsScheduled and customDuration semantics as START_ZONES_WITH_PROGRAM_MUTATION. */
+export const START_ZONES_WITH_PROGRAM_START_TIME_MUTATION = /* GraphQL */ `
+  mutation StartZonesWithProgramStartTime(
+    $programStartTimeId: Int!
+    $markRunAsScheduled: Boolean!
+    $customDuration: Int
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startZonesWithProgramStartTime(
+      programStartTimeId: $programStartTimeId
+      markRunAsScheduled: $markRunAsScheduled
+      customDuration: $customDuration
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: run a chosen set of zones, each with its own duration. zoneIds and
+ * runDurations are parallel arrays; the API gives no guarantee about mismatched
+ * lengths, so the tool layer rejects them rather than letting Hydrawise decide.
+ * runDurations is SECONDS, verified live 2026-07-24: runDurations=[60] produced
+ * a run reported as duration=1 minute with remainingTime counting down from ~60. */
+export const START_SELECTED_ZONES_MUTATION = /* GraphQL */ `
+  mutation StartSelectedZones(
+    $zoneIds: [Int!]!
+    $runDurations: [Int!]!
+    $markRunAsScheduled: Boolean
+    $stackRuns: Boolean
+    $learnCurrentFromNextRun: Boolean
+    $learnFlowFromNextRun: Boolean
+  ) {
+    startSelectedZones(
+      zoneIds: $zoneIds
+      runDurations: $runDurations
+      markRunAsScheduled: $markRunAsScheduled
+      stackRuns: $stackRuns
+      learnCurrentFromNextRun: $learnCurrentFromNextRun
+      learnFlowFromNextRun: $learnFlowFromNextRun
+    ) {
+      status
+      summary
+    }
+  }
+`;
+
+/** GraphQL: cancel in-progress and queued runs for one zone. Distinct from
+ * stopZone, which stops the current run only. */
+export const CANCEL_RUNS_FOR_ZONE_MUTATION = /* GraphQL */ `
+  mutation CancelRunsForZone($zoneId: Int!) {
+    cancelRunsForZone(zoneId: $zoneId) {
+      status
+      summary
+    }
+  }
+`;
+
 export const STOP_ALL_ZONES_MUTATION = /* GraphQL */ `
   mutation StopAllZones($controllerId: Int!) {
     stopAllZones(controllerId: $controllerId) {

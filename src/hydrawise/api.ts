@@ -5,6 +5,7 @@ import {
   CONTROLLER_QUERY,
   CONTROLLER_SENSORS_QUERY,
   CONTROLLERS_QUERY,
+  CANCEL_RUNS_FOR_ZONE_MUTATION,
   CREATE_CONTROLLER_NOTE_MUTATION,
   CREATE_CUSTOM_SENSOR_TYPE_MUTATION,
   CREATE_EXPANDER_MUTATION,
@@ -38,7 +39,10 @@ import {
   SEASONAL_ADJUSTMENTS_QUERY,
   SENSOR_MODEL_CATALOG_QUERY,
   START_ALL_ZONES_MUTATION,
+  START_SELECTED_ZONES_MUTATION,
   START_ZONE_MUTATION,
+  START_ZONES_WITH_PROGRAM_MUTATION,
+  START_ZONES_WITH_PROGRAM_START_TIME_MUTATION,
   STOP_ALL_ZONES_MUTATION,
   STOP_ZONE_MUTATION,
   SUSPEND_ALL_ZONES_MUTATION,
@@ -178,6 +182,19 @@ export interface StartZoneOptions {
   learnFlowFromNextRun?: boolean;
 }
 
+export interface ProgramRunOptions {
+  customDurationSeconds?: number;
+  learnCurrentFromNextRun?: boolean;
+  learnFlowFromNextRun?: boolean;
+}
+
+export interface SelectedZonesRunOptions {
+  markRunAsScheduled?: boolean;
+  stackRuns?: boolean;
+  learnCurrentFromNextRun?: boolean;
+  learnFlowFromNextRun?: boolean;
+}
+
 export interface StartAllZonesOptions {
   durationSeconds?: number;
   markRunAsScheduled?: boolean;
@@ -243,6 +260,82 @@ export class HydrawiseApi {
         learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
       },
       (data) => data.startZone as StatusCodeAndSummary,
+    );
+  }
+
+  // Program-level run control. All four mirror startZone's mutate() path: the
+  // schema returns StatusCodeAndSummary!, so failures surface as
+  // HydrawiseMutationError with the API's own summary text.
+  //
+  // markRunAsScheduled is Boolean! on both program mutations (unlike startZone,
+  // where it defaults), so it is a required parameter rather than an option
+  // with a silent default.
+  async startZonesWithProgram(
+    programId: number,
+    markRunAsScheduled: boolean,
+    options: ProgramRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_ZONES_WITH_PROGRAM_MUTATION,
+      {
+        programId,
+        markRunAsScheduled,
+        customDuration: options.customDurationSeconds ?? null,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) => (data as { startZonesWithProgram: StatusCodeAndSummary }).startZonesWithProgram,
+    );
+  }
+
+  async startZonesWithProgramStartTime(
+    programStartTimeId: number,
+    markRunAsScheduled: boolean,
+    options: ProgramRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_ZONES_WITH_PROGRAM_START_TIME_MUTATION,
+      {
+        programStartTimeId,
+        markRunAsScheduled,
+        customDuration: options.customDurationSeconds ?? null,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) =>
+        (data as { startZonesWithProgramStartTime: StatusCodeAndSummary })
+          .startZonesWithProgramStartTime,
+    );
+  }
+
+  // zoneIds and runDurations are parallel arrays; length equality is enforced at
+  // the tool boundary (a mismatch is caller error, not an API concern).
+  async startSelectedZones(
+    zoneIds: number[],
+    runDurationsSeconds: number[],
+    options: SelectedZonesRunOptions = {},
+  ): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      START_SELECTED_ZONES_MUTATION,
+      {
+        zoneIds,
+        runDurations: runDurationsSeconds,
+        markRunAsScheduled: options.markRunAsScheduled ?? false,
+        stackRuns: options.stackRuns ?? true,
+        learnCurrentFromNextRun: options.learnCurrentFromNextRun ?? null,
+        learnFlowFromNextRun: options.learnFlowFromNextRun ?? null,
+      },
+      (data) => (data as { startSelectedZones: StatusCodeAndSummary }).startSelectedZones,
+    );
+  }
+
+  // Cancels in-progress AND queued runs for a zone; stopZone only stops the
+  // current run.
+  async cancelRunsForZone(zoneId: number): Promise<StatusCodeAndSummary> {
+    return this.client.mutate(
+      CANCEL_RUNS_FOR_ZONE_MUTATION,
+      { zoneId },
+      (data) => (data as { cancelRunsForZone: StatusCodeAndSummary }).cancelRunsForZone,
     );
   }
 
