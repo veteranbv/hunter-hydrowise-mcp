@@ -468,39 +468,6 @@ export class HydrawiseApi {
       },
     );
   }
-
-  async addVirtualWeatherStation(controllerId: number): Promise<boolean> {
-    return this.client.mutateRaw(
-      ADD_VIRTUAL_WEATHER_STATION_MUTATION,
-      { controllerId },
-      (data) => {
-        const ok = (data as { addVirtualWeatherStation: boolean }).addVirtualWeatherStation;
-        if (!ok) {
-          throw new HydrawiseMutationError(
-            `addVirtualWeatherStation returned false for controller ${controllerId}`,
-          );
-        }
-        return true;
-      },
-    );
-  }
-
-  async removeWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
-    return this.client.mutateRaw(
-      REMOVE_WEATHER_STATION_MUTATION,
-      { controllerId, weatherStationId },
-      (data) => {
-        const ok = (data as { removeWeatherStation: boolean | null }).removeWeatherStation;
-        if (!ok) {
-          throw new HydrawiseMutationError(
-            `removeWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
-          );
-        }
-        return true;
-      },
-    );
-  }
-
   // Controller event log. `length` and `page` mirror the schema arguments; the
   // caller decides how far back to walk rather than the API defaulting to 1000.
   async getControllerEvents(controllerId: number, length: number, page: number): Promise<EventRead[]> {
@@ -563,6 +530,37 @@ export class HydrawiseApi {
     );
   }
 
+  async addVirtualWeatherStation(controllerId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      ADD_VIRTUAL_WEATHER_STATION_MUTATION,
+      { controllerId },
+      (data) => {
+        const ok = (data as { addVirtualWeatherStation: boolean }).addVirtualWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `addVirtualWeatherStation returned false for controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
+
+  async removeWeatherStation(controllerId: number, weatherStationId: number): Promise<boolean> {
+    return this.client.mutateRaw(
+      REMOVE_WEATHER_STATION_MUTATION,
+      { controllerId, weatherStationId },
+      (data) => {
+        const ok = (data as { removeWeatherStation: boolean | null }).removeWeatherStation;
+        if (!ok) {
+          throw new HydrawiseMutationError(
+            `removeWeatherStation returned ${ok === null ? 'null' : 'false'} for station ${weatherStationId} on controller ${controllerId}`,
+          );
+        }
+        return true;
+      },
+    );
+  }
   async acknowledgeAllEvents(controllerId: number): Promise<boolean> {
     return this.client.mutateRaw(
       ACKNOWLEDGE_ALL_EVENTS_MUTATION,

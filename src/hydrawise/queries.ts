@@ -848,6 +848,27 @@ export const WEATHER_STATIONS_QUERY = /* GraphQL */ `
   }
 `;
 
+/** GraphQL: the controller's event log. `length` caps the number returned and
+ * `page` walks back through history (schema defaults: 1000 and 0).
+ *
+ * Verified live 2026-07-24: entries carry severity ("Info" observed), a
+ * human-readable message, an isAlert flag, and an `actions` list. `id` is a
+ * String, not an Int, which is why acknowledge_event takes a string id. */
+export const CONTROLLER_EVENTS_QUERY = /* GraphQL */ `
+  query ControllerEvents($controllerId: Int!, $length: Int!, $page: Int!) {
+    controller(controllerId: $controllerId) {
+      events(length: $length, page: $page) {
+        id
+        eventTime
+        severity
+        message
+        isAlert
+        actions
+      }
+    }
+  }
+`;
+
 export interface WeatherStationRead {
   id: number;
   key: string;
@@ -897,27 +918,6 @@ export const ADD_VIRTUAL_WEATHER_STATION_MUTATION = /* GraphQL */ `
 export const REMOVE_WEATHER_STATION_MUTATION = /* GraphQL */ `
   mutation RemoveWeatherStation($controllerId: Int!, $weatherStationId: Int!) {
     removeWeatherStation(controllerId: $controllerId, weatherStationId: $weatherStationId)
-  }
-`;
-
-/** GraphQL: the controller's event log. `length` caps the number returned and
- * `page` walks back through history (schema defaults: 1000 and 0).
- *
- * Verified live 2026-07-24: entries carry severity ("Info" observed), a
- * human-readable message, an isAlert flag, and an `actions` list. `id` is a
- * String, not an Int, which is why acknowledge_event takes a string id. */
-export const CONTROLLER_EVENTS_QUERY = /* GraphQL */ `
-  query ControllerEvents($controllerId: Int!, $length: Int!, $page: Int!) {
-    controller(controllerId: $controllerId) {
-      events(length: $length, page: $page) {
-        id
-        eventTime
-        severity
-        message
-        isAlert
-        actions
-      }
-    }
   }
 `;
 
@@ -1256,7 +1256,11 @@ export interface AdvancedProgramRead {
  * adjustments lives at Configuration.controllerWateringProgramAdjustments —
  * see CONTROLLER_WATERING_ADJUSTMENT_CATALOG_QUERY. `scheduleAdjustmentIds`
  * itself remains write-only. The field is declared on the Program interface,
- * so both Standard and Advanced programs expose it. `isContractor` only
+ * so both Standard and Advanced programs expose it — it is therefore selected
+ * directly on the interface rather than duplicated into `... on StandardProgram`
+ * / `... on AdvancedProgram` fragments. Do NOT reintroduce those fragments: they
+ * would silently return no adjustments for any future Program implementation,
+ * whereas the interface selection picks it up automatically. `isContractor` only
  * switches label wording (false → account-parameterized labels like
  * "0.3in+ rainfall last day"; true → generic contractor labels like
  * "High rainfall last day"). We pass false — end-user MCP sessions want the
@@ -1267,24 +1271,12 @@ export const CONDITIONAL_WATERING_ADJUSTMENTS_QUERY = /* GraphQL */ `
       programs(includeZoneSpecific: true) {
         __typename
         id
-        ... on StandardProgram {
-          conditionalWateringAdjustments(controllerId: $controllerId, isContractor: false) {
-            id
+        conditionalWateringAdjustments(controllerId: $controllerId, isContractor: false) {
+          id
+          label
+          applicableSchedulingMethod {
+            value
             label
-            applicableSchedulingMethod {
-              value
-              label
-            }
-          }
-        }
-        ... on AdvancedProgram {
-          conditionalWateringAdjustments(controllerId: $controllerId, isContractor: false) {
-            id
-            label
-            applicableSchedulingMethod {
-              value
-              label
-            }
           }
         }
       }

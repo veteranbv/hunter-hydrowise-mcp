@@ -536,7 +536,13 @@ describe('update_zone_cycle_soak', () => {
     // Zod rejects null before the handler runs, so the mutation is never dispatched.
     expect(called).toBe(false);
     expect(resp.result?.isError).toBe(true);
-    expect(resp.result!.content[0]!.text).toContain('Expected number, received null');
+    // Match the shape of the type error, not Zod's exact prose: zod 3 said
+    // "Expected number, received null" and zod 4 says "Invalid input: expected
+    // number, received null". The assertion that matters is that the rejection
+    // is a number-vs-null type error, not the wording it arrives in.
+    expect(resp.result!.content[0]!.text.toLowerCase()).toMatch(
+      /expected number, received null/,
+    );
   });
 
   it('routes icon_file_id (not icon) for zones with custom uploaded images', async () => {

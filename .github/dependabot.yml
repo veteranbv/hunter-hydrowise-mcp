@@ -1,0 +1,71 @@
+# Dependabot configuration.
+#
+# There is deliberately no `overrides` block in package.json anymore. The two
+# pins that used to live there were removed on 2026-07-24:
+#   - esbuild: resolved properly by replacing the unmaintained tsup (last release
+#     2025-11-12, pinned esbuild ^0.27.0) with tsdown, which uses Rolldown and
+#     pulls no esbuild at all. Every remaining esbuild in the tree is 0.28.1.
+#   - @hono/node-server: KNOWN AND ACCEPTED. @modelcontextprotocol/sdk v1.x
+#     requires ^1.19.9, and the advisory (GHSA-frvp-7c67-39w9) is a Windows-only
+#     path traversal in hono's `serve-static`, which the SDK does not use — it
+#     imports `getRequestListener`. So `npm audit` reports 2 moderate findings
+#     that are not reachable here. Do not "fix" this by reintroducing an
+#     override that force-upgrades a major under the SDK.
+#     Exit path: MCP SDK v2 splits the monolith into scoped packages, and
+#     @modelcontextprotocol/express depends only on `cors` — no hono at all.
+#     A v2 stable release is expected 2026-07-28, alongside the full 2026-07-28
+#     spec release. Once it lands, migrating drops these 2 findings to 0.
+#     See the "Dependency posture" section in CLAUDE.md before doing it — the
+#     protocol-revision change rides along with the package split.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 5
+    commit-message:
+      # No `include: "scope"` here — Dependabot appends the scope itself, which
+      # combined with these prefixes produced doubled titles like
+      # "chore(deps-dev)(deps-dev): bump eslint ...". The prefixes already carry
+      # the scope.
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    # Batch the low-risk churn into two PRs; majors stay individual so each one
+    # gets its own review. Majors here are real migrations, not rubber-stamp
+    # merges — the MCP SDK v1→v2 split is the live example (see CLAUDE.md), and
+    # the zod v3→v4 bump on 2026-07-24 needed a test assertion rewritten.
+    groups:
+      production-minor-patch:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      dev-minor-patch:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # @types/node tracks the runtime major, which package.json pins at >=24.
+      # A @types/node v25 PR would land types for a Node the project doesn't
+      # target yet; bump this deliberately alongside the engines field.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
+
+  # No workflows exist under .github/workflows yet, so this is currently inert.
+  # It is declared now so that any CI added later gets action-version updates
+  # (and their security advisories) without a second setup step.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Denver"
+    commit-message:
+      prefix: "chore(ci)"

@@ -8,12 +8,47 @@ A Node/TypeScript MCP server for the Hunter HydroWise (Hydrawise) cloud irrigati
 
 ## Stack
 
-- Node **>=24** (ESM, `tsup` build to `dist/`)
+- Node **>=24** (ESM, `tsdown` build to `dist/`)
 - `@modelcontextprotocol/sdk@^1.29` (`McpServer` + `StreamableHTTPServerTransport`)
 - Express 5 hosting the `/mcp` endpoint
 - `graphql-request@^7` against `https://app.hydrawise.com/api/v2/graph`
-- `zod@^3` for all tool input validation
+- `zod@^4` for all tool input validation (migrated from v3 on 2026-07-24; SDK v1.29 accepts `^3.25 || ^4.0`)
 - Auth flow mirrors `Lake292/hunter_hydrawise` (`pydrawise.auth`) — OAuth password grant on `/api/v2/oauth/access-token`
+
+## Dependency posture (`npm audit` is intentionally NOT clean)
+
+There is **no `overrides` block in package.json**, by decision (2026-07-24). `npm audit`
+reports **2 moderate findings for `@hono/node-server`, and that is expected** — do not
+"fix" it by adding an override back.
+
+- **Why it's there.** `@modelcontextprotocol/sdk` v1.x requires `@hono/node-server: ^1.19.9`,
+  and no v1 release has moved off it (1.29.0 is latest). The advisory
+  (GHSA-frvp-7c67-39w9) is a **Windows-only** path traversal in hono's `serve-static` —
+  a module the SDK never uses; it imports `getRequestListener`. This server runs on
+  macOS/Linux bound to loopback, so the vulnerable path is unreachable.
+- **Why not override it.** The old override force-upgraded hono to 2.x *underneath* an SDK
+  that declares `^1.19.9`. Forcing an untested major on the live transport is a larger
+  practical risk than a Windows-only advisory in dead code.
+- **Exit path — expected 2026-07-28.** MCP SDK **v2** splits the monolith into scoped
+  packages; `@modelcontextprotocol/express` depends only on `cors` — no hono in the tree
+  at all. A v2 **stable** release is expected alongside the full **2026-07-28 spec**
+  release on 2026-07-28 (last beta before that: `2.0.0-beta.5`, 2026-07-21; the repo's
+  `v2` milestone was 13/14 closed). Treat the date as expected, not guaranteed — confirm
+  `npm view @modelcontextprotocol/sdk dist-tags` before migrating.
+- **Two separate changes ride along with v2; don't conflate them.**
+  1. *Package split* — `src/server.ts` holds the only runtime imports
+     (`McpServer`, `StreamableHTTPServerTransport`, `isInitializeRequest`); every other
+     file uses `import type { McpServer }`, so those are one-line repoints.
+  2. *Protocol revision* — this server currently negotiates spec **2025-11-25** (see the
+     `protocolVersion` it reports on `initialize`). The 2026-07-28 spec is a new revision;
+     adopting it is a behavioural change, not just a dependency bump. Re-verify against
+     the actual MCP client (Claude Desktop) after switching, since the client and server
+     must agree on a revision both support.
+  `zod@^4` is already done (2026-07-24), which was the bulk of the v2 prerequisite work.
+- **esbuild** was the other pin and is **fully resolved**, not accepted: the unmaintained
+  `tsup` (last release 2025-11-12, capped at esbuild `^0.27.0`) was replaced with
+  `tsdown`, which is Rolldown-based and pulls no esbuild. All remaining esbuild in the
+  tree is 0.28.1.
 
 ## Common commands
 
@@ -93,9 +128,9 @@ openspec/              spec-driven workflow artifacts (proposals, designs, tasks
 
 ### Control — `src/tools/control.ts` (PHYSICAL ACTION)
 - `start_zone`, `stop_zone`, `start_all_zones`, `stop_all_zones`
-- `list_controller_events`, `list_controller_alert_events`, `acknowledge_event`, `acknowledge_all_events` — the controller event log. Note `Controller.alerts` is typed `[Event!]!` upstream: it returns alert-flagged events, not alert configuration, which is why the tool is named for events. `Event.id` is a String, so `acknowledge_event` takes a string id.
-- `run_program`, `run_program_start_time`, `run_selected_zones`, `cancel_zone_runs` — program-level run control. `mark_run_as_scheduled` is required on the two program tools (the mutation declares it non-null). Duration overrides are sent as seconds, verified on a live controller 2026-07-24: `customDuration: 60` produced a 1-minute run, and a program run queues its zones sequentially rather than concurrently. `cancel_zone_runs` clears queued runs too, unlike `stop_zone`.
 - `list_weather_stations`, `add_weather_station`, `add_virtual_weather_station`, `remove_weather_station` — the weather source behind the watering triggers. Mutations return bare Boolean, so failures map to mutation_error explicitly. Observed live: `add_virtual_weather_station` returns true without attaching anything when the account's station slot is already full, so re-read the list to confirm.
+- `run_program`, `run_program_start_time`, `run_selected_zones`, `cancel_zone_runs` — program-level run control. `mark_run_as_scheduled` is required on the two program tools (the mutation declares it non-null). Duration overrides are sent as seconds, verified on a live controller 2026-07-24: `customDuration: 60` produced a 1-minute run, and a program run queues its zones sequentially rather than concurrently. `cancel_zone_runs` clears queued runs too, unlike `stop_zone`.
+- `list_controller_events`, `list_controller_alert_events`, `acknowledge_event`, `acknowledge_all_events` — the controller event log. Note `Controller.alerts` is typed `[Event!]!` upstream: it returns alert-flagged events, not alert configuration, which is why the tool is named for events. `Event.id` is a String, so `acknowledge_event` takes a string id.
 - `suspend_zone`, `resume_zone`, `suspend_all_zones`, `resume_all_zones`
 
 ### Scheduling — `src/tools/scheduling.ts` (reads + PHYSICAL ACTION writes)

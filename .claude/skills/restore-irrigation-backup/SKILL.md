@@ -61,6 +61,22 @@ Specific safety-critical caveats:
 - If a caveat mentions **unit-pref drift** (watering triggers captured in F/mph but live account uses C/kph, etc.) — STOP. Do not proceed until the user explicitly tells you whether to convert values. Applying the recipe verbatim would produce numerically wrong results (97°F captured → 97 restored as °C scorches the lawn).
 - If a caveat mentions **custom sensor types** — note that the recipe's `create_sensor` steps reference snapshot-time `model_id`s that won't exist on the new account; you'll re-resolve the new ids after each `create_custom_sensor_type` succeeds (see step 6).
 - If a caveat mentions **unreadable fields** — note that `update_zone_settings` steps will have null values for required fields; you'll merge with live state at execute time (see step 6).
+- If a caveat mentions **reusable `schedule_adjustment_ids`** — do NOT just collect an acknowledgement. Acknowledgement is not verification: these ids are opaque account-managed integers, and an id whose *definition* changed since capture restores silently wrong watering behavior (no error, no failed step). Run the comparison in step 4a below before proceeding.
+
+#### 4a. Verify schedule adjustments (when the snapshot references any)
+
+Trigger: the snapshot has a reusable-`schedule_adjustment_ids` caveat, or any program in `snapshot.controller.programs[]` has a non-empty `schedule_adjustment_ids`.
+
+1. Call `list_watering_adjustments(controller_id)` on the **target** controller to read its live catalog.
+2. Build the capture-time reference set from the snapshot: each program's `schedule_adjustments` (`{id, label}` pairs, snapshot v9+) plus `snapshot.controller.watering_adjustment_catalog` (which also carries `applicable_scheduling_method`).
+3. For every referenced id, compare **id + label + applicable_scheduling_method together**. Matching on id alone is not sufficient and matching on label alone is not sufficient — the same label legitimately appears under different ids for different scheduling methods (e.g. "Forecast below 50°F" can exist as a Time Based id, a Smart Watering id, and a Virtual Solar Sync id simultaneously).
+4. Classify and act:
+   - **Exact match** (id, label, and method all agree) → verified; proceed.
+   - **Id present but label or method differs** → STOP. The id was redefined between capture and restore. Show the user both sides (captured vs live) and ask explicitly whether to keep the snapshot's id, substitute the live id whose label+method matches the captured meaning, or drop the adjustment. Do not guess.
+   - **Id absent from the live catalog** → STOP and report. The restore step referencing it will fail loudly, so surface it now rather than mid-recipe. If a live entry has the same label+method under a different id, offer that substitution.
+5. **Pre-v9 snapshot, or `watering_adjustment_catalog` captured as `[]`** (the caveat says so explicitly): the snapshot cannot back the comparison on its own. Tell the user the ids cannot be verified from this snapshot, show the live catalog so they can confirm the intended meanings by hand, and get explicit confirmation before proceeding.
+
+Report the comparison as a short table (id, captured label, live label, method, verdict) rather than prose.
 
 ### 5. Recommend a savepoint
 

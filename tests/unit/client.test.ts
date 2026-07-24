@@ -20,16 +20,25 @@ function makeAuthStub(): AuthLike {
   } as unknown as AuthLike;
 }
 
+// client.ts does `new GraphQLClient(...)`, so the mock implementation MUST be
+// constructable. An arrow function is not: vitest 4 tightened this and throws
+// "... is not a constructor" (vitest 3 tolerated it). A plain `function` works
+// under both — `new F()` returns F's returned object. Do not convert this back
+// to an arrow function.
+function mockGraphQLClient(request: () => Promise<unknown>): void {
+  (GraphQLClient as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(
+    function () {
+      return { request };
+    },
+  );
+}
+
 describe('GraphQLHydrawiseClient', () => {
   it('raises HydrawiseMutationError when status is ERROR', async () => {
     resetClientForTesting();
-    (GraphQLClient as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(
-      () => ({
-        request: async () => ({
-          startZone: { status: 'ERROR', summary: 'Zone is already running' },
-        }),
-      }),
-    );
+    mockGraphQLClient(async () => ({
+      startZone: { status: 'ERROR', summary: 'Zone is already running' },
+    }));
     const client = getClient(makeAuthStub());
     await expect(
       client.mutate(
@@ -46,13 +55,9 @@ describe('GraphQLHydrawiseClient', () => {
       { status: 401, headers: new Headers(), errors: [], data: undefined } as unknown as ConstructorParameters<typeof ClientError>[0],
       { query: 'q' },
     );
-    (GraphQLClient as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(
-      () => ({
-        request: async () => {
-          throw err;
-        },
-      }),
-    );
+    mockGraphQLClient(async () => {
+      throw err;
+    });
     const client = getClient(makeAuthStub());
     await expect(client.query('query { me { id } }')).rejects.toThrowError(HydrawiseAuthError);
   });
@@ -68,13 +73,9 @@ describe('GraphQLHydrawiseClient', () => {
       } as unknown as ConstructorParameters<typeof ClientError>[0],
       { query: 'q' },
     );
-    (GraphQLClient as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(
-      () => ({
-        request: async () => {
-          throw err;
-        },
-      }),
-    );
+    mockGraphQLClient(async () => {
+      throw err;
+    });
     const client = getClient(makeAuthStub());
     await expect(client.query('query { me { id } }')).rejects.toThrowError(HydrawiseAPIError);
   });
